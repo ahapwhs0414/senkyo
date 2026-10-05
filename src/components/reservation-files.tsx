@@ -17,40 +17,47 @@ export function ReservationFiles({
   return (
     <div className="stack">
       <h3>예약 첨부</h3>
-      {attachments.map((a) => (
-        <button
-          key={a.id}
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            setError("");
-            const tab = window.open("about:blank", "_blank");
-            if (tab) tab.opener = null;
-            try {
-              const response = await fetch(`/api/attachments?id=${a.id}`, {
-                cache: "no-store",
-              });
-              const result: { url?: string; error?: string } =
-                await response.json();
-              if (!response.ok || !result.url) throw new Error(result.error);
-              if (tab) tab.location.href = result.url;
-              else
-                throw new Error(
-                  "팝업이 차단되었습니다. 팝업 허용 후 다시 열어주세요",
+      {attachments.map((a) =>
+        a.text_content != null ? (
+          <section className="card" key={a.id}>
+            <h4>{String(a.file_name)}</h4>
+            <p className="attachment-text">{String(a.text_content)}</p>
+          </section>
+        ) : (
+          <button
+            key={a.id}
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setError("");
+              const tab = window.open("about:blank", "_blank");
+              if (tab) tab.opener = null;
+              try {
+                const response = await fetch(`/api/attachments?id=${a.id}`, {
+                  cache: "no-store",
+                });
+                const result: { url?: string; error?: string } =
+                  await response.json();
+                if (!response.ok || !result.url) throw new Error(result.error);
+                if (tab) tab.location.href = result.url;
+                else
+                  throw new Error(
+                    "팝업이 차단되었습니다. 팝업 허용 후 다시 열어주세요",
+                  );
+              } catch (e) {
+                tab?.close();
+                setError(
+                  e instanceof Error ? e.message : "첨부를 열지 못했습니다",
                 );
-            } catch (e) {
-              tab?.close();
-              setError(
-                e instanceof Error ? e.message : "첨부를 열지 못했습니다",
-              );
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {String(a.file_name)} ↗
-        </button>
-      ))}
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {String(a.file_name)} ↗
+          </button>
+        ),
+      )}
       {writable &&
         attachments.map((a) => (
           <button
@@ -81,7 +88,7 @@ export function ReservationFiles({
         ))}
       {!attachments.length && (
         <p className="muted">
-          첨부된 확인서가 없습니다. PDF 또는 이미지를 등록해보세요.
+          첨부된 확인서가 없습니다. 파일 또는 텍스트를 등록해보세요.
         </p>
       )}
       <form
@@ -121,6 +128,55 @@ export function ReservationFiles({
         </label>
         <button disabled={!writable || busy}>
           {busy ? "처리 중…" : "첨부 업로드"}
+        </button>
+      </form>
+      <form
+        className="stack"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const node = e.currentTarget;
+          setBusy(true);
+          setError("");
+          try {
+            const form = new FormData(node);
+            form.set("reservation_id", reservation.id);
+            const response = await fetch("/api/attachments", {
+              method: "POST",
+              body: form,
+            });
+            const result: { error?: string } = await response.json();
+            if (!response.ok) throw new Error(result.error);
+            await onRefresh();
+            node.reset();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "텍스트 저장 실패");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <label>
+          텍스트 제목
+          <input
+            name="title"
+            required
+            maxLength={200}
+            disabled={!writable || busy}
+          />
+        </label>
+        <label>
+          첨부 텍스트
+          <textarea
+            name="text_content"
+            required
+            maxLength={10000}
+            rows={5}
+            disabled={!writable || busy}
+            placeholder="예약 안내, 확인 메시지 등을 입력하세요"
+          />
+        </label>
+        <button disabled={!writable || busy}>
+          {busy ? "처리 중…" : "텍스트 첨부 저장"}
         </button>
       </form>
       {error && (

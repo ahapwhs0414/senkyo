@@ -9,12 +9,16 @@ export async function POST(request: Request) {
     const { client } = await authorize(true);
     const form = await request.formData();
     const reservationId = z.uuid().parse(form.get("reservation_id"));
+    const textInput = form.get("text_content");
+    const text =
+      textInput === null
+        ? null
+        : z.string().trim().min(1).max(10000).parse(textInput);
     const file = form.get("file");
-    if (!(file instanceof File) || file.size > 10485760)
+    if (text !== null && file instanceof File && file.size > 0)
+      throw new Error("파일과 텍스트는 각각 첨부해주세요");
+    if (text === null && (!(file instanceof File) || file.size > 10485760))
       throw new Error("PDF, PNG, JPG, WEBP 파일을 10MB 이하로 선택해주세요");
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    if (!validFile(bytes, file.type))
-      throw new Error("파일 형식이나 크기가 올바르지 않습니다");
     const { data: reservation } = await client
       .from("reservations")
       .select("id")
@@ -22,6 +26,21 @@ export async function POST(request: Request) {
       .eq("id", reservationId)
       .single();
     if (!reservation) throw new Error("예약을 찾을 수 없습니다");
+    if (text !== null) {
+      const title = z.string().trim().min(1).max(200).parse(form.get("title"));
+      const { error } = await client.from("reservation_attachments").insert({
+        trip_id: TRIP_ID,
+        reservation_id: reservationId,
+        file_name: title,
+        text_content: text,
+      });
+      if (error) throw new Error("텍스트 첨부를 저장하지 못했습니다");
+      return NextResponse.json({ ok: true });
+    }
+    if (!(file instanceof File)) throw new Error("파일을 선택해주세요");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (!validFile(bytes, file.type))
+      throw new Error("파일 형식이나 크기가 올바르지 않습니다");
     const path = `${TRIP_ID}/${reservationId}/${crypto.randomUUID()}`;
     const { error: uploadError } = await client.storage
       .from("reservation-files")
@@ -59,7 +78,7 @@ export async function GET(request: Request) {
       .eq("trip_id", TRIP_ID)
       .eq("id", id)
       .single();
-    if (!data) throw new Error("첨부를 찾을 수 없습니다");
+    if (!data?.storage_path) throw new Error("파일 첨부를 찾을 수 없습니다");
     const { data: url, error } = await client.storage
       .from("reservation-files")
       .createSignedUrl(data.storage_path, 60);
@@ -88,11 +107,13 @@ export async function DELETE(request: Request) {
       .eq("id", id)
       .single();
     if (!attachment) throw new Error("첨부를 찾을 수 없습니다");
-    const { error: storageError } = await client.storage
-      .from("reservation-files")
-      .remove([attachment.storage_path]);
-    if (storageError)
-      throw new Error("파일을 삭제하지 못했습니다. 다시 시도해주세요");
+    if (attachment.storage_path) {
+      const { error: storageError } = await client.storage
+        .from("reservation-files")
+        .remove([attachment.storage_path]);
+      if (storageError)
+        throw new Error("파일을 삭제하지 못했습니다. 다시 시도해주세요");
+    }
     const { error: dbError } = await client
       .from("reservation_attachments")
       .delete()

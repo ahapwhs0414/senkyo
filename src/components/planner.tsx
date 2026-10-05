@@ -1166,6 +1166,12 @@ function ScheduleDetail({
   const links = data.reservation_schedule_items.filter(
     (l) => l.schedule_item_id === item.id,
   );
+  const packing = data.packing_items.filter(
+    (p) => p.schedule_item_id === item.id,
+  );
+  const checklist = data.checklist_items.filter(
+    (p) => p.schedule_item_id === item.id,
+  );
   return (
     <dialog ref={dialog} onCancel={close}>
       <div className="row between">
@@ -1196,22 +1202,26 @@ function ScheduleDetail({
           </a>
         </>
       )}
-      <h3>준비물</h3>
-      {data.packing_items
-        .filter((p) => p.schedule_item_id === item.id)
-        .map((p) => (
-          <p key={p.id}>
-            {p.checked ? "✓" : "□"} {String(p.label)}
-          </p>
-        ))}
-      <h3>체크리스트</h3>
-      {data.checklist_items
-        .filter((p) => p.schedule_item_id === item.id)
-        .map((p) => (
-          <p key={p.id}>
-            {p.status === "DONE" ? "✓" : "□"} {String(p.title)}
-          </p>
-        ))}
+      {packing.length > 0 && (
+        <section>
+          <h3>준비물</h3>
+          {packing.map((p) => (
+            <p key={p.id}>
+              {p.checked ? "✓" : "□"} {String(p.label)}
+            </p>
+          ))}
+        </section>
+      )}
+      {checklist.length > 0 && (
+        <section>
+          <h3>체크리스트</h3>
+          {checklist.map((p) => (
+            <p key={p.id}>
+              {p.status === "DONE" ? "✓" : "□"} {String(p.title)}
+            </p>
+          ))}
+        </section>
+      )}
       <h3>예약</h3>
       {links.length ? (
         links.map((l) => (

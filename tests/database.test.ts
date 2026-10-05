@@ -177,3 +177,35 @@ describe("schema, seed and authorization", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("private reservation text attachments", () => {
+  it("allows an editor to save text and a viewer to read it", async () => {
+    await asUser(
+      editor,
+      `insert into reservation_attachments(trip_id,reservation_id,file_name,text_content) select '${trip}',id,'안내','예약 확인 메시지' from reservations limit 1`,
+    );
+    const result = await asUser(
+      viewer,
+      "select text_content from reservation_attachments where file_name='안내'",
+    );
+    expect(result.rows).toEqual([{ text_content: "예약 확인 메시지" }]);
+    await expect(
+      asUser(
+        viewer,
+        `insert into reservation_attachments(trip_id,reservation_id,file_name,text_content) select '${trip}',id,'forbidden','text' from reservations limit 1`,
+      ),
+    ).rejects.toThrow();
+  });
+  it("rejects empty text and incomplete file attachments", async () => {
+    await expect(
+      db.exec(
+        `insert into reservation_attachments(trip_id,reservation_id,file_name,text_content) select '${trip}',id,'empty','   ' from reservations limit 1`,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      db.exec(
+        `insert into reservation_attachments(trip_id,reservation_id,file_name) select '${trip}',id,'missing' from reservations limit 1`,
+      ),
+    ).rejects.toThrow();
+  });
+});

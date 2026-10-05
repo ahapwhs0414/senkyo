@@ -214,3 +214,82 @@ test("rejects a stale edit and supports read-only offline snapshots", async ({
     ),
   ).toBe(true);
 });
+
+test("centers dialogs, hides empty preparation sections, and saves text attachments", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("button", { name: "일정", exact: true }).click();
+  const response = await page.request.get("/api/data");
+  const data = (await response.json()) as import("../../src/lib/domain").Data;
+  const item = data.schedule_items.find(
+    (s) =>
+      s.date === "2026-12-22" &&
+      !data.transport_segments.some((t) => t.schedule_item_id === s.id) &&
+      !data.packing_items.some((p) => p.schedule_item_id === s.id) &&
+      !data.checklist_items.some((c) => c.schedule_item_id === s.id),
+  );
+  expect(item).toBeTruthy();
+  await page
+    .locator(".timeline article")
+    .filter({
+      has: page.getByRole("heading", {
+        name: String(item!.title),
+        exact: true,
+      }),
+    })
+    .getByRole("button", { name: "상세 보기" })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole("heading", { name: "준비물", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole("heading", { name: "체크리스트", exact: true }),
+  ).toHaveCount(0);
+  for (const viewport of [
+    { width: 320, height: 740 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const bounds = await dialog.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(
+      Math.abs(bounds!.x + bounds!.width / 2 - viewport.width / 2),
+    ).toBeLessThan(2);
+    expect(
+      Math.abs(bounds!.y + bounds!.height / 2 - viewport.height / 2),
+    ).toBeLessThan(2);
+  }
+  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await menu(page, "예약");
+  const reservation = page
+    .locator("article")
+    .filter({
+      has: page.getByRole("heading", {
+        name: "APA 호텔 TKP 센다이 에키기타",
+        exact: true,
+      }),
+    });
+  await reservation
+    .getByLabel("텍스트 제목", { exact: true })
+    .fill("체크인 안내");
+  await reservation
+    .getByLabel("첨부 텍스트", { exact: true })
+    .fill("여권을 준비하세요.\n<script>plain text</script>");
+  await reservation.getByRole("button", { name: "텍스트 첨부 저장" }).click();
+  await expect(reservation.locator(".attachment-text")).toHaveText(
+    "여권을 준비하세요.\n<script>plain text</script>",
+  );
+  await page.reload();
+  await menu(page, "예약");
+  await expect(reservation.locator(".attachment-text")).toContainText(
+    "여권을 준비하세요.",
+  );
+  page.once("dialog", (d) => d.accept());
+  await reservation
+    .getByRole("button", { name: "체크인 안내 삭제", exact: true })
+    .click();
+  await expect(reservation.locator(".attachment-text")).toHaveCount(0);
+});

@@ -264,14 +264,12 @@ test("centers dialogs, hides empty preparation sections, and saves text attachme
   }
   await dialog.getByRole("button", { name: "닫기", exact: true }).click();
   await menu(page, "예약");
-  const reservation = page
-    .locator("article")
-    .filter({
-      has: page.getByRole("heading", {
-        name: "APA 호텔 TKP 센다이 에키기타",
-        exact: true,
-      }),
-    });
+  const reservation = page.locator("article").filter({
+    has: page.getByRole("heading", {
+      name: "APA 호텔 TKP 센다이 에키기타",
+      exact: true,
+    }),
+  });
   await reservation
     .getByLabel("텍스트 제목", { exact: true })
     .fill("체크인 안내");
@@ -292,4 +290,182 @@ test("centers dialogs, hides empty preparation sections, and saves text attachme
     .getByRole("button", { name: "체크인 안내 삭제", exact: true })
     .click();
   await expect(reservation.locator(".attachment-text")).toHaveCount(0);
+});
+
+test("opens only the linked reservation in a dialog without leaving the schedule", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("button", { name: "일정", exact: true }).click();
+  const response = await page.request.get("/api/data");
+  const data = (await response.json()) as import("../../src/lib/domain").Data;
+  const segment = data.transport_segments.find(
+    (t) => t.date === "2026-12-22" && t.reservation_id,
+  );
+  expect(segment).toBeTruthy();
+  const reservation = data.reservations.find(
+    (r) => r.id === segment!.reservation_id,
+  )!;
+  await page
+    .getByRole("button", { name: "예약정보", exact: true })
+    .first()
+    .click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole("heading", {
+      name: String(reservation.title),
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(dialog.getByLabel("첨부 텍스트", { exact: true })).toBeVisible();
+  await expect(page.locator('nav button[aria-current="page"]')).toHaveText(
+    "일정",
+  );
+  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('nav button[aria-current="page"]')).toHaveText(
+    "일정",
+  );
+  const linked = data.schedule_items.find(
+    (s) =>
+      s.date === "2026-12-22" &&
+      !data.transport_segments.some((t) => t.schedule_item_id === s.id) &&
+      data.reservation_schedule_items.some((l) => l.schedule_item_id === s.id),
+  );
+  expect(linked).toBeTruthy();
+  await page
+    .locator(".timeline article")
+    .filter({
+      has: page.getByRole("heading", {
+        name: String(linked!.title),
+        exact: true,
+      }),
+    })
+    .getByRole("button", { name: "상세 보기" })
+    .click();
+  const link = data.reservation_schedule_items.find(
+    (l) => l.schedule_item_id === linked!.id,
+  )!;
+  const linkedReservation = data.reservations.find(
+    (r) => r.id === link.reservation_id,
+  )!;
+  await dialog
+    .getByRole("button", { name: String(linkedReservation.title), exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("heading", {
+      name: String(linkedReservation.title),
+      exact: true,
+    }),
+  ).toBeVisible();
+});
+
+test("adds connections inside a schedule, maps its places by date, and saves dragged order", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("button", { name: "일정", exact: true }).click();
+  await page.getByRole("button", { name: "일정 추가", exact: true }).click();
+  let dialog = page.getByRole("dialog").last();
+  await expect(dialog.getByLabel("정렬 순서", { exact: false })).toHaveCount(0);
+  await dialog.getByLabel("제목 *", { exact: true }).fill("새 마지막 일정");
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(page.locator(".timeline").last()).toContainText(
+    "새 마지막 일정",
+  );
+  await page
+    .locator(".timeline")
+    .last()
+    .getByRole("button", { name: "상세 보기" })
+    .click();
+  dialog = page.getByRole("dialog").last();
+  await page.route("**/api/places?*", (r) =>
+    r.fulfill({
+      json: {
+        places: [
+          {
+            id: "schedule-google-place",
+            displayName: { text: "일정 전용 장소" },
+            formattedAddress: "일정 장소 주소",
+          },
+        ],
+      },
+    }),
+  );
+  await dialog.getByLabel("이 일정의 장소 검색").fill("일정 장소");
+  await dialog
+    .getByRole("button", { name: "Google 장소 검색", exact: true })
+    .click();
+  await dialog
+    .getByRole("button", { name: "이 일정에 장소 추가", exact: true })
+    .click();
+  await expect(
+    dialog.getByText("일정 전용 장소", { exact: true }),
+  ).toBeVisible();
+  await dialog
+    .getByRole("button", { name: "새 예약 추가", exact: true })
+    .click();
+  const editor = page.getByRole("dialog").last();
+  await editor.getByLabel("제목 *", { exact: true }).fill("일정 전용 예약");
+  await editor.getByLabel("예약번호", { exact: true }).fill("SCHEDULE-TEST");
+  await editor.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(
+    page
+      .getByRole("dialog")
+      .getByRole("button", { name: "일정 전용 예약", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "닫기", exact: true })
+    .click();
+  await page.getByRole("button", { name: "지도", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "일정 전용 장소", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /DAY 2/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "일정 전용 장소", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: /DAY 1/ }).click();
+  await page.getByRole("button", { name: "일정", exact: true }).click();
+  const original = (await (
+    await page.request.get("/api/data")
+  ).json()) as import("../../src/lib/domain").Data;
+  const rows = original.schedule_items
+    .filter((s) => s.date === "2026-12-22")
+    .sort((a, b) => Number(a.sort_order) - Number(b.sort_order));
+  await page.getByRole("button", { name: "순서 편집", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  const handle = dialog.getByRole("button", {
+    name: `${rows[1].title} 이동 손잡이`,
+    exact: true,
+  });
+  const origin = await handle.boundingBox();
+  const target = await dialog.locator("[data-order-id]").first().boundingBox();
+  await page.mouse.move(
+    origin!.x + origin!.width / 2,
+    origin!.y + origin!.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    target!.x + target!.width / 2,
+    target!.y + target!.height / 2,
+  );
+  await page.mouse.up();
+  await expect(dialog.locator("[data-order-id]").first()).toHaveAttribute(
+    "data-order-id",
+    rows[1].id,
+  );
+  await dialog.getByRole("button", { name: "순서 저장", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const saved = (await (
+    await page.request.get("/api/data")
+  ).json()) as import("../../src/lib/domain").Data;
+  expect(
+    saved.schedule_items
+      .filter((s) => s.date === "2026-12-22")
+      .sort((a, b) => Number(a.sort_order) - Number(b.sort_order))[0].id,
+  ).toBe(rows[1].id);
 });

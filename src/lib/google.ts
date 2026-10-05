@@ -46,3 +46,30 @@ export const googlePlaceSchema = z.object({
     .optional(),
 });
 export type GooglePlace = z.infer<typeof googlePlaceSchema>;
+
+export function googleErrorMessage(body: unknown): string {
+  const parsed = z
+    .object({
+      error: z
+        .object({
+          details: z
+            .array(z.object({ reason: z.string().optional() }))
+            .optional(),
+        })
+        .optional(),
+    })
+    .safeParse(body);
+  const reasons = parsed.success
+    ? (parsed.data.error?.details?.map((d) => d.reason) ?? [])
+    : [];
+  if (reasons.includes("API_KEY_HTTP_REFERRER_BLOCKED"))
+    return "Google 장소 서비스가 서버 접근을 차단했습니다. 서버용 키의 웹사이트 제한 설정을 확인해주세요.";
+  if (
+    reasons.includes("SERVICE_DISABLED") ||
+    reasons.includes("API_KEY_SERVICE_BLOCKED")
+  )
+    return "Google Places API (New)가 허용되지 않았습니다. 장소 서비스 설정을 확인해주세요.";
+  if (reasons.includes("BILLING_DISABLED"))
+    return "Google 장소 서비스의 결제 설정을 확인해주세요.";
+  return "Google 장소 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
+}

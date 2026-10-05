@@ -197,3 +197,37 @@ describe("time and seed edge cases", () => {
     expect(linked).toEqual(["FLIGHT"]);
   });
 });
+
+describe("map schedule connections", () => {
+  it("includes all linked places only for selected schedules", async () => {
+    const { linkedPlaceIds } = await import("../src/lib/domain");
+    const data = {
+      schedule_items: [
+        { id: "s1", trip_id: "t", place_id: "main" },
+        { id: "s2", trip_id: "t", place_id: "other-day" },
+      ],
+      schedule_places: [
+        { id: "l", trip_id: "t", schedule_item_id: "s1", place_id: "extra" },
+      ],
+      meal_candidates: [
+        { id: "c", trip_id: "t", meal_schedule_id: "s1", place_id: "meal" },
+      ],
+      transport_segments: [
+        {
+          id: "x",
+          trip_id: "t",
+          schedule_item_id: "s1",
+          origin_place_id: "start",
+          destination_place_id: "end",
+        },
+      ],
+    };
+    expect([...linkedPlaceIds(data, ["s1"])].sort()).toEqual([
+      "end",
+      "extra",
+      "main",
+      "meal",
+      "start",
+    ]);
+  });
+});

@@ -23,6 +23,7 @@ const url = z
 const owner = z.enum(["USER_A", "USER_B", "SHARED"]);
 const scope = { date, schedule_item_id: uuid };
 export const schemas = {
+  schedule_places: z.object({ schedule_item_id: z.uuid(), place_id: z.uuid() }),
   schedule_items: z.object({
     date: z.iso.date(),
     title: required,
@@ -52,7 +53,7 @@ export const schemas = {
     place_id: uuid,
     description: text,
     status: z.enum(["planned", "confirmed", "completed", "skipped"]),
-    sort_order: z.number().int().min(0),
+    sort_order: z.number().int().min(0).default(0),
     is_fixed: z.boolean(),
     estimated_cost_yen: yen,
     note: text,
@@ -383,4 +384,21 @@ export function validFile(bytes: Uint8Array, mime: string) {
         : mime === "image/webp"
           ? ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP"
           : false;
+}
+
+export function linkedPlaceIds(data: Data, scheduleIds: string[]): Set<string> {
+  const schedules = new Set(scheduleIds);
+  const ids = new Set<string>();
+  for (const s of data.schedule_items ?? [])
+    if (schedules.has(s.id) && s.place_id) ids.add(String(s.place_id));
+  for (const l of data.schedule_places ?? [])
+    if (schedules.has(String(l.schedule_item_id))) ids.add(String(l.place_id));
+  for (const c of data.meal_candidates ?? [])
+    if (schedules.has(String(c.meal_schedule_id))) ids.add(String(c.place_id));
+  for (const t of data.transport_segments ?? [])
+    if (schedules.has(String(t.schedule_item_id))) {
+      if (t.origin_place_id) ids.add(String(t.origin_place_id));
+      if (t.destination_place_id) ids.add(String(t.destination_place_id));
+    }
+  return ids;
 }

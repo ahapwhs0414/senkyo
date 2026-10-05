@@ -41,6 +41,13 @@ const category = f("category", "카테고리", "text", {
 const yen = (key: string, label: string, required = false) =>
   f(key, label, "number", { required });
 export const forms: Record<Table, Field[]> = {
+  schedule_places: [
+    f("schedule_item_id", "일정", "text", {
+      ref: "schedule_items",
+      required: true,
+    }),
+    f("place_id", "장소", "text", { ref: "places", required: true }),
+  ],
   transport_segments: [
     { ...date, required: true },
     f("schedule_item_id", "연결 일정", "text", { ref: "schedule_items" }),
@@ -106,7 +113,7 @@ export const forms: Record<Table, Field[]> = {
       options: ["planned", "confirmed", "completed", "skipped"],
       default: "planned",
     }),
-    yen("sort_order", "정렬 순서", true),
+
     f("is_fixed", "시간 고정", "checkbox"),
     yen("estimated_cost_yen", "1인 예상비용 (엔)"),
     note,
@@ -260,6 +267,7 @@ export const labels: Record<string, string> = {
   checklist_items: "체크리스트",
   reservations: "예약",
   reservation_schedule_items: "예약과 일정 연결",
+  schedule_places: "일정 장소 연결",
   budget_items: "예산",
   expenses: "지출 / 정산",
   shopping_items: "쇼핑",

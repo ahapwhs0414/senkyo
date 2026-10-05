@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authorize } from "@/lib/supabase-server";
-import { googlePlaceSchema } from "@/lib/google";
+import { googlePlaceSchema, googleErrorMessage } from "@/lib/google";
 export async function GET(request: Request) {
   try {
     await authorize();
@@ -54,7 +54,11 @@ export async function GET(request: Request) {
         },
       );
     }
-    if (!response.ok) throw new Error("Google 장소 정보를 불러오지 못했습니다");
+    if (!response.ok)
+      return NextResponse.json(
+        { error: googleErrorMessage(await response.json().catch(() => null)) },
+        { status: 502, headers: { "Cache-Control": "no-store" } },
+      );
     const body: unknown = await response.json();
     const result = id
       ? googlePlaceSchema.parse(body)

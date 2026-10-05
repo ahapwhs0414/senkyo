@@ -33,6 +33,9 @@ import { Editor } from "./editor";
 import { Places } from "./places";
 import { TravelMap } from "./travel-map";
 import { ReservationFiles } from "./reservation-files";
+import { ScheduleConnections } from "./schedule-connections";
+import { ScheduleOrder } from "./schedule-order";
+import { ReservationDetail } from "./reservation-detail";
 type View =
   | "today"
   | "schedule"
@@ -87,7 +90,22 @@ export function Planner({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [editor, setEditor] = useState<{ table: Table; row: Row } | null>(null);
+  const [ordering, setOrdering] = useState(false);
   const [detail, setDetail] = useState<Row | null>(null);
+  const [reservationDetailId, setReservationDetailId] = useState<string | null>(
+    null,
+  );
+  const reservationDetail = data.reservations.find(
+    (r) => r.id === reservationDetailId,
+  );
+  function openReservation(id: string) {
+    if (!data.reservations.some((r) => r.id === id)) {
+      setError("연결된 예약을 찾을 수 없습니다. 새로고침해주세요");
+      return;
+    }
+    setDetail(null);
+    setReservationDetailId(id);
+  }
   const member = members.find((m) => m.user_id === userId);
   const writable = !offline && member?.role !== "VIEWER";
   const refresh = useCallback(async () => {
@@ -187,7 +205,23 @@ export function Planner({
     }
   }
   const edit = (table: Table, row?: Row) =>
-    setEditor({ table, row: row ?? defaults(table, date) });
+    setEditor({
+      table,
+      row: row ?? {
+        ...defaults(table, date),
+        ...(table === "schedule_items"
+          ? {
+              sort_order:
+                Math.max(
+                  -1,
+                  ...data.schedule_items
+                    .filter((s) => s.date === date)
+                    .map((s) => Number(s.sort_order)),
+                ) + 1,
+            }
+          : {}),
+      },
+    });
   const changeView = (next: View) => {
     setView(next);
     setSearch("");
@@ -397,7 +431,9 @@ export function Planner({
             </button>
           )}
           {row.reservation_id && (
-            <button onClick={() => changeView("reservations")}>예약정보</button>
+            <button onClick={() => openReservation(String(row.reservation_id))}>
+              예약정보
+            </button>
           )}
         </div>
       </div>
@@ -970,6 +1006,12 @@ export function Planner({
             <h1>우리의 일정</h1>
             <div className="row">
               {addButton("schedule_items")}
+              <button
+                disabled={!writable || busy || schedules.length < 2}
+                onClick={() => setOrdering(true)}
+              >
+                순서 편집
+              </button>
               {addButton("transport_segments")}
             </div>
           </div>
@@ -1098,6 +1140,7 @@ export function Planner({
           "schedule_items",
           "meal_candidates",
           "reservation_schedule_items",
+          "schedule_places",
         ].includes(view) &&
         genericList(view as Table)}
       {editor && (
@@ -1121,6 +1164,31 @@ export function Planner({
             setDetail(null);
           }}
           writable={writable}
+          openReservation={openReservation}
+          members={members}
+          refresh={refresh}
+        />
+      )}
+      {ordering && (
+        <ScheduleOrder
+          date={date}
+          items={schedules}
+          close={() => setOrdering(false)}
+          refresh={refresh}
+        />
+      )}
+      {reservationDetail && (
+        <ReservationDetail
+          key={reservationDetail.id}
+          reservation={reservationDetail}
+          data={data}
+          writable={writable}
+          close={() => setReservationDetailId(null)}
+          refresh={refresh}
+          edit={() => {
+            edit("reservations", reservationDetail);
+            setReservationDetailId(null);
+          }}
         />
       )}
       <nav className="nav" aria-label="주요 화면">
@@ -1151,21 +1219,24 @@ function ScheduleDetail({
   close,
   edit,
   writable,
+  openReservation,
+  members,
+  refresh,
 }: {
   item: Row;
   data: Data;
   close: () => void;
   edit: () => void;
   writable: boolean;
+  openReservation: (id: string) => void;
+  members: Member[];
+  refresh: () => Promise<void>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
   const place = data.places.find((p) => p.id === item.place_id);
-  const links = data.reservation_schedule_items.filter(
-    (l) => l.schedule_item_id === item.id,
-  );
   const packing = data.packing_items.filter(
     (p) => p.schedule_item_id === item.id,
   );
@@ -1222,18 +1293,14 @@ function ScheduleDetail({
           ))}
         </section>
       )}
-      <h3>예약</h3>
-      {links.length ? (
-        links.map((l) => (
-          <p key={l.id}>
-            {String(
-              data.reservations.find((r) => r.id === l.reservation_id)?.title,
-            )}
-          </p>
-        ))
-      ) : (
-        <p className="muted">연결된 예약이 없습니다.</p>
-      )}
+      <ScheduleConnections
+        item={item}
+        data={data}
+        members={members}
+        writable={writable}
+        refresh={refresh}
+        openReservation={openReservation}
+      />
       {item.estimated_cost_yen != null && (
         <p>1인 예상비용 {yenLabel(Number(item.estimated_cost_yen))}</p>
       )}

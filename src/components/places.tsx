@@ -69,7 +69,13 @@ export function Places({
       const result: unknown = await response.json();
       if (!response.ok)
         throw new Error(
-          "Google 장소 정보를 불러오지 못했습니다. 저장된 이름과 메모는 계속 확인할 수 있습니다.",
+          (typeof result === "object" &&
+          result !== null &&
+          "error" in result &&
+          typeof result.error === "string"
+            ? result.error
+            : "Google 장소 정보를 불러오지 못했습니다.") +
+            " 저장된 이름과 메모는 계속 확인할 수 있습니다.",
         );
       setDetail(googlePlaceSchema.parse(result));
     } catch (e) {
@@ -347,13 +353,13 @@ export function Places({
                   <button
                     disabled={!writable || busy}
                     onClick={() =>
-                      edit("meal_candidates", {
-                        ...defaults("meal_candidates", "2026-12-22"),
+                      edit("schedule_places", {
+                        ...defaults("schedule_places", "2026-12-22"),
                         place_id: p.id,
                       })
                     }
                   >
-                    식사 후보 연결
+                    장소 일정 연결
                   </button>
                 </div>
                 {candidates.map((c) => (

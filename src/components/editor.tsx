@@ -79,6 +79,8 @@ export function Editor({
                         ? value || null
                         : (value ?? "");
             }
+            if (table === "schedule_items")
+              values.sort_order = Number(row.sort_order ?? 0);
             if (table === "expenses") {
               const [a, b] = splitAmount(
                 Number(values.amount),

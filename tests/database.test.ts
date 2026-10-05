@@ -209,3 +209,87 @@ describe("private reservation text attachments", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("schedule places and order", () => {
+  it("links multiple places with same-trip authorization", async () => {
+    await asUser(
+      editor,
+      `insert into schedule_places(trip_id,schedule_item_id,place_id) select '${trip}',s.id,p.id from schedule_items s cross join places p where s.date='2026-12-22' limit 2`,
+    );
+    expect(
+      (await asUser(viewer, "select * from schedule_places")).rows,
+    ).toHaveLength(2);
+    expect(
+      (
+        await asUser(
+          "33333333-3333-4333-8333-333333333333",
+          "select * from schedule_places",
+        )
+      ).rows,
+    ).toHaveLength(0);
+    await expect(
+      asUser(
+        viewer,
+        `insert into schedule_places(trip_id,schedule_item_id,place_id) select '${trip}',s.id,p.id from schedule_items s cross join places p order by s.id desc,p.id desc limit 1`,
+      ),
+    ).rejects.toThrow();
+  });
+  it("appends new schedules and atomically reorders them with stale edit protection", async () => {
+    const before = (
+      await db.query<{ value: number }>(
+        "select max(sort_order)::int as value from schedule_items where date='2026-12-22'",
+      )
+    ).rows[0].value;
+    const added = await asUser(
+      editor,
+      `insert into schedule_items(trip_id,date,title) values('${trip}','2026-12-22','new schedule') returning sort_order`,
+    );
+    expect((added.rows[0] as { sort_order: number }).sort_order).toBe(
+      before + 1,
+    );
+    const rows = (
+      await db.query<{ id: string; version: string }>(
+        "select id,updated_at::text as version from schedule_items where date='2026-12-22' order by sort_order desc",
+      )
+    ).rows;
+    const ids = rows.map((r) => r.id),
+      versions = rows.map((r) => r.version);
+    await db.exec(
+      `set role authenticated;select set_config('request.jwt.claim.sub','${editor}',false);`,
+    );
+    try {
+      await db.query(
+        "select reorder_schedule($1,$2,$3::uuid[],$4::timestamptz[])",
+        [trip, "2026-12-22", ids, versions],
+      );
+      expect(
+        (
+          await db.query<{ id: string }>(
+            "select id from schedule_items where date='2026-12-22' order by sort_order limit 1",
+          )
+        ).rows[0].id,
+      ).toBe(ids[0]);
+      await expect(
+        db.query(
+          "select reorder_schedule($1,$2,$3::uuid[],$4::timestamptz[])",
+          [trip, "2026-12-22", ids, versions],
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await db.exec("reset role");
+    }
+    await db.exec(
+      `set role authenticated;select set_config('request.jwt.claim.sub','${viewer}',false);`,
+    );
+    try {
+      await expect(
+        db.query(
+          "select reorder_schedule($1,$2,$3::uuid[],$4::timestamptz[])",
+          [trip, "2026-12-22", ids, versions],
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await db.exec("reset role");
+    }
+  });
+});

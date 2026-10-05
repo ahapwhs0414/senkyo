@@ -17,6 +17,7 @@ export default async function Page() {
     "trip_members",
     "profiles",
     "schedule_items",
+    "schedule_places",
     "transport_segments",
     "places",
     "meal_candidates",

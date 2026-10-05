@@ -2,7 +2,7 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import type { Data } from "@/lib/domain";
-import { mapsUrl } from "@/lib/domain";
+import { mapsUrl, linkedPlaceIds } from "@/lib/domain";
 import { googlePlaceSchema, type GooglePlace } from "@/lib/google";
 import { words } from "@/lib/forms";
 interface MapInstance {
@@ -58,25 +58,18 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
   const [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [details, setDetails] = useState<GooglePlace[]>([]);
-  const dayIds = new Set(
-    data.schedule_items.filter((s) => s.date === date).map((s) => s.place_id),
+  const dayIds = linkedPlaceIds(
+    data,
+    data.schedule_items
+      .filter((s) => allDates || s.date === date)
+      .map((s) => s.id),
   );
-  for (const candidate of data.meal_candidates)
-    if (
-      data.schedule_items.some(
-        (s) => s.id === candidate.meal_schedule_id && s.date === date,
-      )
-    )
-      dayIds.add(candidate.place_id);
   const places = data.places.filter(
-    (p) =>
-      (allDates || dayIds.has(p.id)) &&
-      (filter === "all" || p.category === filter),
+    (p) => dayIds.has(p.id) && (filter === "all" || p.category === filter),
   );
-  const ids = places
-    .map((p) => p.google_place_id)
-    .filter(Boolean)
-    .join(",");
+  const ids = [
+    ...new Set(places.map((p) => p.google_place_id).filter(Boolean)),
+  ].join(",");
   useEffect(() => {
     let active = true;
     const markers: Marker[] = [];
@@ -96,10 +89,13 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
                 `/api/places?id=${encodeURIComponent(id)}`,
                 { cache: "no-store" },
               );
-              if (!response.ok)
+              if (!response.ok) {
+                const result: { error?: string } = await response.json();
                 throw new Error(
-                  "일부 장소 좌표를 불러오지 못했습니다. 장소 목록을 이용해주세요",
+                  result.error ??
+                    "일부 장소 좌표를 불러오지 못했습니다. 장소 목록을 이용해주세요",
                 );
+              }
               return googlePlaceSchema.parse(await response.json());
             }),
         );
@@ -242,10 +238,8 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
             {data.schedule_items
               .filter(
                 (s) =>
-                  s.place_id === p.id ||
-                  data.meal_candidates.some(
-                    (c) => c.place_id === p.id && c.meal_schedule_id === s.id,
-                  ),
+                  (allDates || s.date === date) &&
+                  linkedPlaceIds(data, [s.id]).has(p.id),
               )
               .map((s) => `${s.date} ${s.title}`)
               .join(" · ") || "연결 안 됨"}

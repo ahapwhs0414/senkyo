@@ -17,6 +17,7 @@ const user = {
 let data;
 function reset() {
   data = structuredClone(seed);
+  data.schedule_places = [];
   for (const rows of Object.values(data))
     for (const row of rows) row.updated_at = "2026-10-05T00:00:00.000Z";
   data.trip_members = [
@@ -109,6 +110,32 @@ const server = createServer(async (req, res) => {
     respond(200, {});
     return;
   }
+  if (url.pathname === "/rest/v1/rpc/reorder_schedule") {
+    if (!req.headers.authorization?.includes(token)) {
+      respond(403, { message: "Unauthorized" });
+      return;
+    }
+    const rows = data.schedule_items.filter((r) => r.date === body.p_date);
+    if (
+      rows.length !== body.p_ids.length ||
+      rows.some(
+        (r) =>
+          !body.p_ids.includes(r.id) ||
+          body.p_versions[body.p_ids.indexOf(r.id)] !== r.updated_at,
+      )
+    ) {
+      respond(409, { code: "40001" });
+      return;
+    }
+    body.p_ids.forEach((id, index) =>
+      Object.assign(
+        rows.find((r) => r.id === id),
+        { sort_order: index, updated_at: new Date().toISOString() },
+      ),
+    );
+    respond(200, null);
+    return;
+  }
   const table = url.pathname.split("/").at(-1);
   if (!url.pathname.startsWith("/rest/v1/") || !data[table]) {
     respond(404, { message: "Not found" });
@@ -128,6 +155,14 @@ const server = createServer(async (req, res) => {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
+    if (table === "schedule_items")
+      added.sort_order =
+        Math.max(
+          -1,
+          ...data.schedule_items
+            .filter((r) => r.date === added.date)
+            .map((r) => r.sort_order),
+        ) + 1;
     data[table].push(added);
     rows = [added];
   }

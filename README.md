@@ -84,6 +84,8 @@ Vercel에 이 저장소를 연결하고 환경변수를 설정합니다. 공개 
 
 Vercel 환경변수를 추가하거나 변경한 뒤에는 다시 배포해야 합니다. `NEXT_PUBLIC_` 값은 빌드 시 브라우저 번들에 포함되므로 기존 배포에는 자동 적용되지 않습니다.
 
+`vercel.json`은 Next.js 프레임워크와 기본 출력 디렉터리를 명시합니다. Vercel 프로젝트의 Root Directory는 `package.json`이 있는 저장소 루트로 설정하세요. Framework Preset이 Other이거나 Output Directory가 `public`이면 아이콘 등 정적 파일만 제공되고 홈·로그인·API가 `404: NOT_FOUND`를 반환할 수 있습니다. 대시보드에서 Framework Preset을 Next.js로 설정하고 Output Directory의 수동 override를 끈 뒤 새 설정이 포함된 커밋을 배포하세요.
+
 로컬 테스트는 실제 PostgreSQL 엔진(PGlite)에서 migration·Seed·권한·FK·정산을 검증합니다. Supabase 운영 서비스 및 실제 Google API를 사용한 통합 검증은 사용자 키 설정 후 별도로 필요합니다.
 
 구현 참고: [Next.js 설치](https://nextjs.org/docs/app/getting-started/installation), [Supabase SSR](https://supabase.com/docs/guides/auth/server-side/creating-a-client), [Places 필드 선택](https://developers.google.com/maps/documentation/places/web-service/choose-fields).

@@ -56,6 +56,8 @@ node --env-file=.env.local scripts/create-accounts.mjs .env.accounts.json
 - `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`: 지도 표시. Maps JavaScript API와 허용 웹사이트 referrer만 허용합니다.
 - 서버 키에 웹사이트/HTTP referrer 제한을 적용하면 `API_KEY_HTTP_REFERRER_BLOCKED` 오류가 발생합니다. 브라우저 키와 서버 키를 분리하고 서버 키에는 Places API (New) API 제한과 서버 환경에 맞는 애플리케이션 제한을 사용하세요. [Google 키 제한 안내](https://developers.google.com/maps/api-security-best-practices)
 - Google Maps URL 길찾기는 API 키 없이 가능합니다.
+- 로컬 검색은 성공하지만 운영 검색이 실패하면 현재 배포의 Production 환경변수와 서버 키의 IP/API 제한을 확인하세요. 키 변경은 재배포해야 반영됩니다. 서버 로그는 Google 오류 코드와 HTTP 상태만 기록하고 키·검색어·Google 원문은 기록하지 않습니다.
+- 지도에서 지점이 연결되지 않은 장소는 안내와 `Google 지점 연결` 버튼을 표시합니다. 버튼을 누르면 저장된 장소 이름으로 검색하며, 정확한 지점을 선택하면 기존 장소의 Place ID를 갱신합니다. 이름·메모·일정 연결은 보존됩니다.
 - Seed 장소는 정확한 Place ID가 없으므로 장소 상세를 연 뒤 검색 결과에서 지점을 연결하세요.
 - Google 응답은 서버 `no-store`, 브라우저 메모리에서만 유지합니다. Place ID와 사용자가 선택한 이름·메모·후보 설정만 DB에 저장합니다. 사진에는 제공된 작성자 표기를 표시합니다.
 - Routes API는 사용하지 않습니다. 고정 열차·셔틀 시간을 외부 경로로 변경하지 않습니다.

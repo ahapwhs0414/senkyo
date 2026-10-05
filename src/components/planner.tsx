@@ -90,6 +90,7 @@ export function Planner({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [editor, setEditor] = useState<{ table: Table; row: Row } | null>(null);
+  const [placeToConnect, setPlaceToConnect] = useState<string>();
   const [ordering, setOrdering] = useState(false);
   const [detail, setDetail] = useState<Row | null>(null);
   const [reservationDetailId, setReservationDetailId] = useState<string | null>(
@@ -224,6 +225,7 @@ export function Planner({
     });
   const changeView = (next: View) => {
     setView(next);
+    setPlaceToConnect(undefined);
     setSearch("");
     setFilter("all");
     setDetail(null);
@@ -1055,9 +1057,19 @@ export function Planner({
           edit={edit}
           mutate={mutate}
           refresh={refresh}
+          initialPlaceId={placeToConnect}
         />
       )}
-      {view === "map" && <TravelMap data={data} date={date} />}
+      {view === "map" && (
+        <TravelMap
+          data={data}
+          date={date}
+          onConnectPlace={(id) => {
+            changeView("places");
+            setPlaceToConnect(id);
+          }}
+        />
+      )}
       {view === "more" && (
         <>
           <span className="eyebrow">Everything for our trip</span>

@@ -49,7 +49,15 @@ function loadMaps(key: string) {
     });
   return loader;
 }
-export function TravelMap({ data, date }: { data: Data; date: string }) {
+export function TravelMap({
+  data,
+  date,
+  onConnectPlace,
+}: {
+  data: Data;
+  date: string;
+  onConnectPlace: (id: string) => void;
+}) {
   const container = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState("all");
   const [allDates, setAllDates] = useState(false);
@@ -80,7 +88,7 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
       setError("");
       try {
         await loadMaps(key!);
-        const results = await Promise.all(
+        const fetched = await Promise.allSettled(
           ids
             .split(",")
             .filter(Boolean)
@@ -99,6 +107,10 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
               return googlePlaceSchema.parse(await response.json());
             }),
         );
+        const results = fetched.flatMap((r) =>
+          r.status === "fulfilled" ? [r.value] : [],
+        );
+        const failed = fetched.find((r) => r.status === "rejected");
         if (!active || !container.current || !window.google?.maps) return;
         setDetails(results);
         const api = window.google.maps;
@@ -123,9 +135,11 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
           markers.push(marker);
         }
         if (markers.length) map.fitBounds(bounds);
-        else
+        if (failed?.status === "rejected")
           setError(
-            "Google 장소가 연결된 위치가 없습니다. 장소 목록에서 정확한 지점을 연결해보세요.",
+            failed.reason instanceof Error
+              ? failed.reason.message
+              : "일부 장소 정보를 불러오지 못했습니다. 표시된 장소는 계속 확인할 수 있습니다.",
           );
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : "지도 로드 실패");
@@ -170,6 +184,13 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
         <p className="notice">
           지도 API 키가 아직 설정되지 않았습니다. 아래 장소 목록과 Google Maps
           링크를 이용할 수 있습니다.
+        </p>
+      )}
+      {places.length > 0 && !ids && (
+        <p className="notice">
+          이 날짜의 장소는 저장되어 있지만 Google 지점이 아직 연결되지
+          않았습니다. 아래 장소의 ‘Google 지점 연결’을 눌러 정확한 지점을
+          선택해주세요.
         </p>
       )}
       {loading && <p role="status">지도와 장소 위치를 불러오는 중…</p>}
@@ -233,6 +254,11 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
         <div className="card" key={p.id}>
           <h3>{String(p.custom_name)}</h3>
           <p>{String(p.memo)}</p>
+          {!p.google_place_id && (
+            <button onClick={() => onConnectPlace(p.id)}>
+              Google 지점 연결
+            </button>
+          )}
           <p className="muted">
             연결 일정:{" "}
             {data.schedule_items

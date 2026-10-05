@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authorize } from "@/lib/supabase-server";
-import { googlePlaceSchema, googleErrorMessage } from "@/lib/google";
+import { googlePlaceSchema, googleErrorInfo } from "@/lib/google";
 export async function GET(request: Request) {
   try {
     await authorize();
-    const key = process.env.GOOGLE_MAPS_SERVER_API_KEY;
+    const key = process.env.GOOGLE_MAPS_SERVER_API_KEY?.trim();
     if (!key)
       return NextResponse.json(
         { error: "Google Places API 키가 아직 설정되지 않았습니다" },
@@ -54,11 +54,21 @@ export async function GET(request: Request) {
         },
       );
     }
-    if (!response.ok)
+    if (!response.ok) {
+      const info = googleErrorInfo(
+        await response.json().catch(() => null),
+        response.status,
+      );
+      console.error("Google Places request failed", {
+        operation: id ? "detail" : "search",
+        status: response.status,
+        code: info.code,
+      });
       return NextResponse.json(
-        { error: googleErrorMessage(await response.json().catch(() => null)) },
+        { error: info.message, code: info.code },
         { status: 502, headers: { "Cache-Control": "no-store" } },
       );
+    }
     const body: unknown = await response.json();
     const result = id
       ? googlePlaceSchema.parse(body)

@@ -25,3 +25,23 @@ describe("Google API errors", () => {
     expect(googleErrorMessage(null)).toContain("다시 시도");
   });
 });
+
+describe("deployment Google diagnostics", () => {
+  it("identifies invalid keys even when Google omits ErrorInfo details", async () => {
+    const { googleErrorInfo } = await import("../src/lib/google");
+    expect(
+      googleErrorInfo({
+        error: {
+          status: "INVALID_ARGUMENT",
+          message: "API key not valid. Please pass a valid API key.",
+        },
+      }).code,
+    ).toBe("API_KEY_INVALID");
+    expect(
+      googleErrorInfo({ error: { status: "PERMISSION_DENIED" } }).message,
+    ).toContain("서버용 키");
+    expect(
+      googleErrorInfo({ error: { status: "RESOURCE_EXHAUSTED" } }).message,
+    ).toContain("요청 한도");
+  });
+});

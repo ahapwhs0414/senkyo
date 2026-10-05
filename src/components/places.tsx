@@ -11,7 +11,9 @@ export function Places({
   edit,
   mutate,
   refresh,
+  initialPlaceId,
 }: {
+  initialPlaceId?: string;
   data: Data;
   writable: boolean;
   edit: (table: Table, row?: Row) => void;
@@ -23,15 +25,18 @@ export function Places({
   ) => Promise<void>;
   refresh: () => Promise<void>;
 }) {
-  const [query, setQuery] = useState("");
+  const initialPlace = data.places.find((p) => p.id === initialPlaceId);
+  const [query, setQuery] = useState(String(initialPlace?.custom_name ?? ""));
   const [results, setResults] = useState<GooglePlace[]>([]);
   const [detail, setDetail] = useState<GooglePlace | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
-  const [selected, setSelected] = useState<Row | null>(null);
+  const [selected, setSelected] = useState<Row | null>(initialPlace ?? null);
   const [onlyCandidates, setOnlyCandidates] = useState(false);
+  const [lastRequest, setLastRequest] = useState<"search" | "detail">("search");
   async function search() {
+    setLastRequest("search");
     setBusy(true);
     setError("");
     setResults([]);
@@ -52,6 +57,7 @@ export function Places({
     }
   }
   async function open(place: Row) {
+    setLastRequest("detail");
     setSelected(place);
     setDetail(null);
     setError("");
@@ -186,7 +192,7 @@ export function Places({
           <button
             disabled={busy}
             onClick={() => {
-              if (selected) void open(selected);
+              if (selected && lastRequest === "detail") void open(selected);
               else void search();
             }}
           >
@@ -209,6 +215,12 @@ export function Places({
             </button>
           </div>
           <p>{String(selected.memo)}</p>
+          {!selected.google_place_id && (
+            <p className="notice">
+              위 검색에서 정확한 지점을 선택하면 이 장소에 Google 정보가
+              연결됩니다.
+            </p>
+          )}
           {busy && <p role="status">Google 장소 정보 로딩 중…</p>}
           {detail && (
             <>

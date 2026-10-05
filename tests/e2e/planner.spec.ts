@@ -469,3 +469,90 @@ test("adds connections inside a schedule, maps its places by date, and saves dra
       .sort((a, b) => Number(a.sort_order) - Number(b.sort_order))[0].id,
   ).toBe(rows[1].id);
 });
+
+test("treats unconnected map places as setup and connects the existing record", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("button", { name: "지도", exact: true }).click();
+  await expect(
+    page.getByText("Google 장소가 연결된 위치가 없습니다.", { exact: false }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("이 날짜의 장소는 저장되어 있지만", { exact: false }),
+  ).toBeVisible();
+  const card = page
+    .locator(".card")
+    .filter({
+      has: page.getByRole("button", { name: "Google 지점 연결", exact: true }),
+    })
+    .first();
+  const title = await card.getByRole("heading").innerText();
+  const before = (await (
+    await page.request.get("/api/data")
+  ).json()) as import("../../src/lib/domain").Data;
+  await card
+    .getByRole("button", { name: "Google 지점 연결", exact: true })
+    .click();
+  await expect(page.getByLabel("장소 또는 식당 검색")).toHaveValue(title);
+  await page.route("**/api/places?*", (r) =>
+    r.fulfill({
+      json: {
+        places: [
+          {
+            id: "existing-seed-place",
+            displayName: { text: "정확한 지점" },
+            location: { latitude: 35, longitude: 139 },
+          },
+        ],
+      },
+    }),
+  );
+  let failedOnce = false;
+  await page.route("**/api/places?*", async (r) => {
+    if (!failedOnce) {
+      failedOnce = true;
+      await r.fulfill({
+        status: 502,
+        json: { error: "Google 장소 서비스가 서버 IP를 차단했습니다." },
+      });
+    } else
+      await r.fulfill({
+        json: {
+          places: [
+            {
+              id: "existing-seed-place",
+              displayName: { text: "정확한 지점" },
+              location: { latitude: 35, longitude: 139 },
+            },
+          ],
+        },
+      });
+  });
+  await page.getByRole("button", { name: "검색", exact: true }).click();
+  await expect(page.locator(".error[role=alert]")).toContainText("서버 IP");
+  await page.getByRole("button", { name: "재시도", exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: "선택한 장소에 Google 지점 연결",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "선택한 장소에 Google 지점 연결",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  const after = (await (
+    await page.request.get("/api/data")
+  ).json()) as import("../../src/lib/domain").Data;
+  expect(after.places.length).toBe(before.places.length);
+  expect(
+    after.places.find((p) => p.custom_name === title)?.google_place_id,
+  ).toBe("existing-seed-place");
+  await page.getByRole("button", { name: "지도", exact: true }).click();
+  await expect(
+    page.getByText("이 날짜의 장소는 저장되어 있지만", { exact: false }),
+  ).toHaveCount(0);
+});

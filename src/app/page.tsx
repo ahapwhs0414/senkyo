@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { Planner } from "@/components/planner";
 import { authorize, configured } from "@/lib/supabase-server";
-import { TRIP_ID, type Data, type Member } from "@/lib/domain";
+import { TRIP_ID, readTables, type Data, type Member } from "@/lib/domain";
 export const dynamic = "force-dynamic";
 export default async function Page() {
   if (!configured()) redirect("/login");
@@ -11,28 +11,7 @@ export default async function Page() {
   } catch {
     redirect("/login");
   }
-  const tables = [
-    "trips",
-    "trip_days",
-    "trip_members",
-    "profiles",
-    "schedule_items",
-    "schedule_places",
-    "transport_segments",
-    "places",
-    "meal_candidates",
-    "packing_items",
-    "checklist_items",
-    "reservations",
-    "reservation_attachments",
-    "reservation_schedule_items",
-    "budget_items",
-    "expenses",
-    "expense_splits",
-    "shopping_items",
-    "emergency_contacts",
-    "notes",
-  ];
+  const tables = readTables;
   const entries = await Promise.all(
     tables.map(async (table) => {
       let query = auth.client.from(table).select("*");

@@ -2,16 +2,7 @@ import { sameOrigin } from "@/lib/request-security";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authorize } from "@/lib/supabase-server";
-import { TRIP_ID, schemas, type Table } from "@/lib/domain";
-const readTables = [
-  "trips",
-  "trip_days",
-  "trip_members",
-  "profiles",
-  "reservation_attachments",
-  "expense_splits",
-  ...Object.keys(schemas),
-];
+import { TRIP_ID, schemas, readTables, type Table } from "@/lib/domain";
 export async function GET() {
   try {
     const { client } = await authorize();
@@ -51,19 +42,6 @@ export async function POST(request: Request) {
     const { client } = await authorize(true);
     const input = envelope.parse(await request.json());
     const values = schemas[input.table].parse(input.values);
-    if (
-      input.table === "places" &&
-      "google_place_id" in values &&
-      values.google_place_id
-    ) {
-      const { data: existing } = await client
-        .from("places")
-        .select("id")
-        .eq("trip_id", TRIP_ID)
-        .eq("google_place_id", values.google_place_id)
-        .maybeSingle();
-      if (existing && !input.id) return NextResponse.json(existing);
-    }
     let query = input.id
       ? client
           .from(input.table)

@@ -2,7 +2,7 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import type { Data } from "@/lib/domain";
-import { mapsUrl, linkedPlaceIds } from "@/lib/domain";
+import { placeMapUrl, linkedPlaceIds } from "@/lib/domain";
 import { googlePlaceSchema, type GooglePlace } from "@/lib/google";
 import { words } from "@/lib/forms";
 interface MapInstance {
@@ -30,34 +30,60 @@ interface GoogleMaps {
 declare global {
   interface Window {
     google?: { maps: GoogleMaps };
+    gm_authFailure?: () => void;
   }
 }
 let loader: Promise<void> | null = null;
 function loadMaps(key: string) {
-  if (window.google?.maps) return Promise.resolve();
+  if (window.google?.maps?.Map) return Promise.resolve();
   if (!loader)
-    loader = new Promise((resolve, reject) => {
+    loader = new Promise<void>((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&language=ko`;
-      script.onload = () => resolve();
-      script.onerror = () => {
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timeout);
+        window.removeEventListener("senkyo-maps-auth-error", authFailure);
+      };
+      const fail = (message: string) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
         loader = null;
         script.remove();
-        reject(new Error("지도를 불러오지 못했습니다"));
+        reject(new Error(message));
       };
+      const authFailure = () =>
+        fail(
+          "Google 지도 인증에 실패했습니다. 브라우저 키의 API·도메인·결제 설정을 확인해주세요. 외부 지도 링크는 계속 사용할 수 있습니다.",
+        );
+      const timeout = setTimeout(
+        () =>
+          fail(
+            "지도 로딩 시간이 초과되었습니다. 아래 지도 링크를 이용하거나 재시도해주세요.",
+          ),
+        10000,
+      );
+      window.gm_authFailure = () =>
+        window.dispatchEvent(new Event("senkyo-maps-auth-error"));
+      window.addEventListener("senkyo-maps-auth-error", authFailure);
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&language=ko`;
+      script.onload = () => {
+        if (!window.google?.maps?.Map) {
+          fail("지도 스크립트를 초기화하지 못했습니다");
+          return;
+        }
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+      script.onerror = () =>
+        fail("지도를 불러오지 못했습니다. 아래 외부 지도 링크를 이용해주세요");
       document.head.append(script);
     });
   return loader;
 }
-export function TravelMap({
-  data,
-  date,
-  onConnectPlace,
-}: {
-  data: Data;
-  date: string;
-  onConnectPlace: (id: string) => void;
-}) {
+export function TravelMap({ data, date }: { data: Data; date: string }) {
   const container = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState("all");
   const [allDates, setAllDates] = useState(false);
@@ -66,23 +92,53 @@ export function TravelMap({
   const [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [details, setDetails] = useState<GooglePlace[]>([]);
-  const dayIds = linkedPlaceIds(
-    data,
-    data.schedule_items
-      .filter((s) => allDates || s.date === date)
-      .map((s) => s.id),
-  );
-  const places = data.places.filter(
-    (p) => dayIds.has(p.id) && (filter === "all" || p.category === filter),
-  );
+  const selectedSchedules = data.schedule_items
+    .filter((s) => !s.archived && (allDates || s.date === date))
+    .sort(
+      (a, b) =>
+        String(a.date).localeCompare(String(b.date)) ||
+        Number(a.sort_order) - Number(b.sort_order),
+    );
+  const orderedIds = [
+    ...new Set(
+      selectedSchedules.flatMap((s) => [
+        ...linkedPlaceIds(
+          {
+            ...data,
+            schedule_places: [...(data.schedule_places ?? [])].sort(
+              (a, b) => Number(a.sort_order) - Number(b.sort_order),
+            ),
+          },
+          [s.id],
+        ),
+      ]),
+    ),
+  ];
+  const places = data.places
+    .filter(
+      (p) =>
+        !p.archived &&
+        orderedIds.includes(p.id) &&
+        (filter === "all" || p.category === filter),
+    )
+    .sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id));
   const ids = [
     ...new Set(places.map((p) => p.google_place_id).filter(Boolean)),
   ].join(",");
   useEffect(() => {
     let active = true;
     const markers: Marker[] = [];
+    const authFailure = () => {
+      loader = null;
+      setError(
+        "Google 지도 인증 실패 · API 활성화, 허용 도메인과 결제 설정을 확인해주세요. 아래 지도 링크는 계속 사용할 수 있습니다.",
+      );
+    };
+    window.addEventListener("senkyo-maps-auth-error", authFailure);
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!key) return;
+    if (!key)
+      return () =>
+        window.removeEventListener("senkyo-maps-auth-error", authFailure);
     async function run() {
       setLoading(true);
       setError("");
@@ -150,6 +206,7 @@ export function TravelMap({
     void run();
     return () => {
       active = false;
+      window.removeEventListener("senkyo-maps-auth-error", authFailure);
       markers.forEach((m) => m.setMap(null));
     };
   }, [ids, retry]);
@@ -189,8 +246,8 @@ export function TravelMap({
       {places.length > 0 && !ids && (
         <p className="notice">
           이 날짜의 장소는 저장되어 있지만 Google 지점이 아직 연결되지
-          않았습니다. 아래 장소의 ‘Google 지점 연결’을 눌러 정확한 지점을
-          선택해주세요.
+          않았습니다. 계획서의 검색 링크로 지점을 확인할 수 있습니다. 좌표나
+          Place ID를 임의로 표시하지 않습니다.
         </p>
       )}
       {loading && <p role="status">지도와 장소 위치를 불러오는 중…</p>}
@@ -246,47 +303,20 @@ export function TravelMap({
       )}
       {!places.length && (
         <p className="empty">
-          이 필터에 연결된 장소가 없습니다. 장소를 등록하거나 다른 필터를
-          선택해보세요.
+          이 필터에 연결된 장소가 없습니다. 다른 날짜나 필터를 선택해보세요.
         </p>
       )}
       {places.map((p) => (
         <div className="card" key={p.id}>
           <h3>{String(p.custom_name)}</h3>
           <p>{String(p.memo)}</p>
-          {!p.google_place_id && (
-            <button onClick={() => onConnectPlace(p.id)}>
-              Google 지점 연결
-            </button>
-          )}
-          <p className="muted">
-            연결 일정:{" "}
-            {data.schedule_items
-              .filter(
-                (s) =>
-                  (allDates || s.date === date) &&
-                  linkedPlaceIds(data, [s.id]).has(p.id),
-              )
-              .map((s) => `${s.date} ${s.title}`)
-              .join(" · ") || "연결 안 됨"}
-          </p>
-
-          <p>
-            {details.find((d) => d.id === p.google_place_id)
-              ?.formattedAddress ?? "주소는 Google 장소 연결 후 조회합니다"}
-          </p>
           <a
             className="link"
-            href={mapsUrl(
-              String(p.custom_name),
-              undefined,
-              "transit",
-              String(p.google_place_id ?? "") || undefined,
-            )}
+            href={placeMapUrl(p)}
             target="_blank"
             rel="noopener noreferrer"
           >
-            Google Maps ↗
+            지도 보기 ↗
           </a>
         </div>
       ))}

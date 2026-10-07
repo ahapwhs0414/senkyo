@@ -4,16 +4,27 @@ import { authorize } from "@/lib/supabase-server";
 import { googlePlaceSchema, googleErrorInfo } from "@/lib/google";
 export async function GET(request: Request) {
   try {
-    await authorize();
+    try {
+      await authorize();
+    } catch {
+      return NextResponse.json(
+        { error: "로그인이 필요합니다" },
+        { status: 401 },
+      );
+    }
+    const params = new URL(request.url).searchParams;
+    const id = params.get("id");
+    if (!id)
+      return NextResponse.json(
+        { error: "장소 검색은 제공하지 않습니다" },
+        { status: 400 },
+      );
     const key = process.env.GOOGLE_MAPS_SERVER_API_KEY?.trim();
     if (!key)
       return NextResponse.json(
         { error: "Google Places API 키가 아직 설정되지 않았습니다" },
         { status: 503 },
       );
-    const params = new URL(request.url).searchParams;
-    const id = params.get("id");
-    const query = params.get("q");
     let response: Response;
     if (id) {
       z.string()
@@ -32,26 +43,12 @@ export async function GET(request: Request) {
         },
       );
     } else {
-      const text = z.string().trim().min(2).max(200).parse(query);
-      response = await fetch(
-        "https://places.googleapis.com/v1/places:searchText",
+      return NextResponse.json(
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": key,
-            "X-Goog-FieldMask":
-              "places.id,places.displayName,places.formattedAddress,places.location",
-          },
-          body: JSON.stringify({
-            textQuery: text,
-            languageCode: "ko",
-            regionCode: "JP",
-            pageSize: 10,
-          }),
-          cache: "no-store",
-          signal: AbortSignal.timeout(10000),
+          error:
+            "장소 검색은 제공하지 않습니다. 계획서의 지도 링크를 이용해주세요",
         },
+        { status: 400 },
       );
     }
     if (!response.ok) {
@@ -60,7 +57,7 @@ export async function GET(request: Request) {
         response.status,
       );
       console.error("Google Places request failed", {
-        operation: id ? "detail" : "search",
+        operation: "detail",
         status: response.status,
         code: info.code,
       });
@@ -70,11 +67,7 @@ export async function GET(request: Request) {
       );
     }
     const body: unknown = await response.json();
-    const result = id
-      ? googlePlaceSchema.parse(body)
-      : z
-          .object({ places: z.array(googlePlaceSchema).default([]) })
-          .parse(body);
+    const result = googlePlaceSchema.parse(body);
     return NextResponse.json(result, {
       headers: { "Cache-Control": "no-store" },
     });

@@ -15,8 +15,7 @@ export async function POST(request: Request) {
         ? null
         : z.string().trim().min(1).max(10000).parse(textInput);
     const file = form.get("file");
-    if (text !== null && file instanceof File && file.size > 0)
-      throw new Error("파일과 텍스트는 각각 첨부해주세요");
+    const hasFile = file instanceof File && file.size > 0;
     if (text === null && (!(file instanceof File) || file.size > 10485760))
       throw new Error("PDF, PNG, JPG, WEBP 파일을 10MB 이하로 선택해주세요");
     const { data: reservation } = await client
@@ -26,7 +25,7 @@ export async function POST(request: Request) {
       .eq("id", reservationId)
       .single();
     if (!reservation) throw new Error("예약을 찾을 수 없습니다");
-    if (text !== null) {
+    if (text !== null && !hasFile) {
       const title = z.string().trim().min(1).max(200).parse(form.get("title"));
       const { error } = await client.from("reservation_attachments").insert({
         trip_id: TRIP_ID,
@@ -41,6 +40,15 @@ export async function POST(request: Request) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (!validFile(bytes, file.type))
       throw new Error("파일 형식이나 크기가 올바르지 않습니다");
+    const title = form.get("title");
+    const fileName = title
+      ? z.string().trim().min(1).max(200).parse(title)
+      : file.name.slice(0, 200);
+    const description = z
+      .string()
+      .trim()
+      .max(2000)
+      .parse(form.get("description") ?? "");
     const path = `${TRIP_ID}/${reservationId}/${crypto.randomUUID()}`;
     const { error: uploadError } = await client.storage
       .from("reservation-files")
@@ -51,10 +59,12 @@ export async function POST(request: Request) {
       .insert({
         trip_id: TRIP_ID,
         reservation_id: reservationId,
-        file_name: file.name.slice(0, 200),
+        file_name: fileName,
         storage_path: path,
         mime_type: file.type,
         size_bytes: file.size,
+        text_content: text,
+        description,
       });
     if (dbError) {
       await client.storage.from("reservation-files").remove([path]);

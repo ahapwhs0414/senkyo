@@ -23,121 +23,6 @@ const url = z
 const owner = z.enum(["USER_A", "USER_B", "SHARED"]);
 const scope = { date, schedule_item_id: uuid };
 export const schemas = {
-  schedule_places: z.object({ schedule_item_id: z.uuid(), place_id: z.uuid() }),
-  schedule_items: z.object({
-    date: z.iso.date(),
-    title: required,
-    type: z.enum([
-      "FLIGHT",
-      "TRAIN",
-      "TRANSIT",
-      "HOTEL",
-      "ATTRACTION",
-      "MEAL",
-      "SHOPPING",
-      "WALK",
-      "FREE_TIME",
-      "OTHER",
-    ]),
-    time_label: text,
-    start_time: z
-      .string()
-      .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/)
-      .nullable()
-      .optional(),
-    end_time: z
-      .string()
-      .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/)
-      .nullable()
-      .optional(),
-    place_id: uuid,
-    description: text,
-    status: z.enum(["planned", "confirmed", "completed", "skipped"]),
-    sort_order: z.number().int().min(0).default(0),
-    is_fixed: z.boolean(),
-    estimated_cost_yen: yen,
-    note: text,
-  }),
-  transport_segments: z
-    .object({
-      date: z.iso.date(),
-      schedule_item_id: uuid,
-      origin_name: required,
-      destination_name: required,
-      origin_place_id: uuid,
-      destination_place_id: uuid,
-      departure_time: z
-        .string()
-        .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/)
-        .nullable()
-        .optional(),
-      arrival_time: z
-        .string()
-        .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/)
-        .nullable()
-        .optional(),
-      time_label: text,
-      transport_type: z.enum([
-        "WALK",
-        "TRAIN",
-        "SUBWAY",
-        "BUS",
-        "SHINKANSEN",
-        "AIRPORT_EXPRESS",
-        "FLIGHT",
-        "SHUTTLE",
-        "TAXI",
-        "OTHER",
-      ]),
-      route_name: text,
-      operator: optional,
-      boarding_point: optional,
-      alighting_point: optional,
-      estimated_duration_minutes: yen,
-      estimated_cost_min_yen: yen,
-      estimated_cost_max_yen: yen,
-      reservation_required: z.boolean(),
-      reservation_id: uuid,
-      ticket_note: text,
-      preparation_note: text,
-      is_fixed: z.boolean(),
-    })
-    .refine(
-      (v) =>
-        v.estimated_cost_min_yen == null ||
-        v.estimated_cost_max_yen == null ||
-        v.estimated_cost_max_yen >= v.estimated_cost_min_yen,
-      { message: "최대 금액을 확인해주세요", path: ["estimated_cost_max_yen"] },
-    ),
-  places: z.object({
-    google_place_id: optional,
-    custom_name: required,
-    category: z.enum([
-      "RESTAURANT",
-      "CAFE",
-      "ATTRACTION",
-      "HOTEL",
-      "SHOPPING",
-      "STATION",
-      "AIRPORT",
-      "OTHER",
-    ]),
-    memo: text,
-  }),
-  meal_candidates: z
-    .object({
-      place_id: z.uuid(),
-      meal_schedule_id: uuid,
-      memo: text,
-      priority: z.number().int().min(0).max(10),
-      tags: text,
-      favorite: z.boolean(),
-      visited: z.boolean(),
-    })
-    .refine((v) => !v.visited || Boolean(v.meal_schedule_id), {
-      message: "방문 선택은 식사 일정에 연결해야 합니다",
-      path: ["meal_schedule_id"],
-    }),
   packing_items: z.object({
     ...scope,
     label: required,
@@ -147,10 +32,18 @@ export const schemas = {
     required: z.boolean(),
     note: text,
     sort_order: z.number().int().min(0),
+    repeat_daily: z.boolean().default(false),
+  }),
+  packing_checks: z.object({
+    packing_item_id: z.uuid(),
+    date: z.iso.date(),
+    owner,
+    checked: z.boolean(),
   }),
   checklist_items: z.object({
     ...scope,
     title: required,
+    scope: z.enum(["PRE_TRIP", "TRIP", "DATE", "SCHEDULE"]).default("TRIP"),
     description: text,
     owner,
     status: z.enum(["TODO", "DONE"]),
@@ -171,6 +64,7 @@ export const schemas = {
         "OTHER",
       ]),
       title: required,
+      material_only: z.boolean().default(false),
       provider: optional,
       reservation_number: optional,
       booker_name: optional,
@@ -203,39 +97,6 @@ export const schemas = {
     reservation_id: z.uuid(),
     schedule_item_id: z.uuid(),
   }),
-  budget_items: z
-    .object({
-      category: required,
-      title: required,
-      estimated_amount_yen: z.number().int().min(0).max(100000000),
-      estimated_max_yen: yen,
-      actual_amount_yen: yen,
-      note: text,
-    })
-    .refine(
-      (v) =>
-        v.estimated_max_yen == null ||
-        v.estimated_max_yen >= v.estimated_amount_yen,
-      { message: "최대 금액을 확인하세요", path: ["estimated_max_yen"] },
-    ),
-  expenses: z
-    .object({
-      date: z.iso.date(),
-      category: required,
-      title: required,
-      amount: z.number().int().positive().max(100000000),
-      currency: z.literal("JPY"),
-      payer_user_id: z.uuid(),
-      split_mode: z.enum(["EQUAL", "USER_A_ONLY", "USER_B_ONLY", "CUSTOM"]),
-      share_a_yen: z.number().int().min(0),
-      share_b_yen: z.number().int().min(0),
-      place_id: uuid,
-      note: text,
-    })
-    .refine((v) => v.share_a_yen + v.share_b_yen === v.amount, {
-      message: "분담액 합계가 지출액과 같아야 합니다",
-      path: ["share_a_yen"],
-    }),
   shopping_items: z.object({
     name: required,
     category: text,
@@ -259,7 +120,7 @@ export type Table = keyof typeof schemas;
 export type Cell = string | number | boolean | null;
 export type Row = {
   id: string;
-  trip_id: string;
+  trip_id?: string;
   updated_at?: string;
   [field: string]: Cell | undefined;
 };
@@ -304,46 +165,64 @@ export function mapsUrl(
   if (placeId) params.set("destination_place_id", placeId);
   return `https://www.google.com/maps/dir/?${params}`;
 }
-export function splitAmount(
-  amount: number,
-  mode: string,
-  custom = 0,
-): [number, number] {
-  if (!Number.isSafeInteger(amount) || amount <= 0)
-    throw new Error("정수 엔 금액을 입력하세요");
-  const a =
-    mode === "EQUAL"
-      ? Math.ceil(amount / 2)
-      : mode === "USER_A_ONLY"
-        ? amount
-        : mode === "USER_B_ONLY"
-          ? 0
-          : custom;
-  if (!Number.isSafeInteger(a) || a < 0 || a > amount)
-    throw new Error("분담액을 확인하세요");
-  return [a, amount - a];
-}
-export function settlement(expenses: Row[], members: Member[]) {
-  return members.map((m) => {
-    const paid = expenses
-      .filter((e) => e.payer_user_id === m.user_id)
-      .reduce((s, e) => s + Number(e.amount), 0);
-    const share = expenses.reduce(
-      (s, e) =>
-        s + Number(e[m.slot === "USER_A" ? "share_a_yen" : "share_b_yen"]),
-      0,
-    );
-    return { ...m, paid, share, balance: paid - share };
-  });
-}
-export function inScope(row: Row, date: string, schedules: Row[]) {
+export function inScope(
+  row: Row,
+  date: string,
+  schedules: Row[],
+  links: Row[] = [],
+) {
+  if (row.archived || row.scope === "PRE_TRIP") return false;
   if (row.schedule_item_id)
     return schedules.some(
-      (s) => s.id === row.schedule_item_id && s.date === date,
+      (s) => !s.archived && s.id === row.schedule_item_id && s.date === date,
+    );
+  const connected = links.filter((l) => l.packing_item_id === row.id);
+  if (connected.length && !row.repeat_daily)
+    return connected.some((l) =>
+      schedules.some(
+        (s) => !s.archived && s.id === l.schedule_item_id && s.date === date,
+      ),
     );
   return row.date == null || row.date === date;
 }
+export function packingChecked(row: Row, date: string, checks: Row[]) {
+  return row.repeat_daily
+    ? Boolean(
+        checks.find(
+          (c) =>
+            c.packing_item_id === row.id &&
+            c.date === date &&
+            c.owner === row.owner,
+        )?.checked,
+      )
+    : Boolean(row.checked);
+}
+export function placeMapUrl(place: Row) {
+  if (
+    typeof place.maps_url === "string" &&
+    /^https:\/\/(www\.)?google\.com\/maps\//.test(place.maps_url)
+  )
+    return place.maps_url;
+  const p = new URLSearchParams({ api: "1", query: String(place.custom_name) });
+  if (place.google_place_id)
+    p.set("query_place_id", String(place.google_place_id));
+  return `https://www.google.com/maps/search/?${p}`;
+}
+export const readTables = [
+  "trips",
+  "trip_days",
+  "trip_members",
+  "profiles",
+  "places",
+  "schedule_items",
+  "schedule_places",
+  "transport_segments",
+  "packing_schedule_items",
+  "reservation_attachments",
+  ...Object.keys(schemas),
+];
 export function currentSchedule(items: Row[], date: string, now = new Date()) {
+  items = items.filter((s) => !s.archived && s.start_time);
   if (date !== tokyoDate(now))
     return { current: null, next: items[0] ?? null, minutes: null };
   const time = tokyoTime(now);
@@ -392,11 +271,10 @@ export function linkedPlaceIds(data: Data, scheduleIds: string[]): Set<string> {
   for (const s of data.schedule_items ?? [])
     if (schedules.has(s.id) && s.place_id) ids.add(String(s.place_id));
   for (const l of data.schedule_places ?? [])
-    if (schedules.has(String(l.schedule_item_id))) ids.add(String(l.place_id));
-  for (const c of data.meal_candidates ?? [])
-    if (schedules.has(String(c.meal_schedule_id))) ids.add(String(c.place_id));
+    if (!l.archived && schedules.has(String(l.schedule_item_id)))
+      ids.add(String(l.place_id));
   for (const t of data.transport_segments ?? [])
-    if (schedules.has(String(t.schedule_item_id))) {
+    if (!t.archived && schedules.has(String(t.schedule_item_id))) {
       if (t.origin_place_id) ids.add(String(t.origin_place_id));
       if (t.destination_place_id) ids.add(String(t.destination_place_id));
     }

@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { Snowflake } from "lucide-react";
 import { useRouter } from "next/navigation";
 export function Login({ configured }: { configured: boolean }) {
   const [error, setError] = useState("");
@@ -8,12 +9,15 @@ export function Login({ configured }: { configured: boolean }) {
   return (
     <main className="login">
       <div className="card">
+        <span className="winter-badge">
+          <Snowflake size={18} /> OUR WINTER JOURNEY
+        </span>
         <span className="eyebrow">Sendai · Akiu · Tokyo</span>
         <h1>둘이, 일본</h1>
         <p className="muted">
           12월 22일부터 27일까지
           <br />
-          우리의 겨울 여행을 한곳에.
+          함께 준비하는 우리의 겨울 여행.
         </p>
         {!configured && (
           <p className="notice">

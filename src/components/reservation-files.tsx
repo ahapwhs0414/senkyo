@@ -17,47 +17,57 @@ export function ReservationFiles({
   return (
     <div className="stack">
       <h3>예약 첨부</h3>
-      {attachments.map((a) =>
-        a.text_content != null ? (
-          <section className="card" key={a.id}>
-            <h4>{String(a.file_name)}</h4>
+      {attachments.map((a) => (
+        <section className="attachment-row" key={a.id}>
+          <h4>{String(a.file_name)}</h4>
+          {a.description && (
+            <p className="attachment-text">{String(a.description)}</p>
+          )}
+          {a.text_content != null && (
             <p className="attachment-text">{String(a.text_content)}</p>
-          </section>
-        ) : (
-          <button
-            key={a.id}
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError("");
-              const tab = window.open("about:blank", "_blank");
-              if (tab) tab.opener = null;
-              try {
-                const response = await fetch(`/api/attachments?id=${a.id}`, {
-                  cache: "no-store",
-                });
-                const result: { url?: string; error?: string } =
-                  await response.json();
-                if (!response.ok || !result.url) throw new Error(result.error);
-                if (tab) tab.location.href = result.url;
-                else
-                  throw new Error(
-                    "팝업이 차단되었습니다. 팝업 허용 후 다시 열어주세요",
-                  );
-              } catch (e) {
-                tab?.close();
-                setError(
-                  e instanceof Error ? e.message : "첨부를 열지 못했습니다",
-                );
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            {String(a.file_name)} ↗
-          </button>
-        ),
-      )}
+          )}
+          {a.storage_path && (
+            <>
+              <small className="muted">
+                {String(a.mime_type)} · {Math.ceil(Number(a.size_bytes) / 1024)}{" "}
+                KB
+              </small>
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setError("");
+                  const tab = window.open("about:blank", "_blank");
+                  if (tab) tab.opener = null;
+                  try {
+                    const response = await fetch(
+                      `/api/attachments?id=${a.id}`,
+                      { cache: "no-store" },
+                    );
+                    const result = await response.json();
+                    if (!response.ok || !result.url)
+                      throw new Error(result.error);
+                    if (tab) tab.location.href = result.url;
+                    else
+                      throw new Error(
+                        "팝업이 차단되었습니다. 팝업 허용 후 다시 열어주세요",
+                      );
+                  } catch (e) {
+                    tab?.close();
+                    setError(
+                      e instanceof Error ? e.message : "첨부를 열지 못했습니다",
+                    );
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                파일 보기·다운로드 ↗
+              </button>
+            </>
+          )}
+        </section>
+      ))}
       {writable &&
         attachments.map((a) => (
           <button
@@ -101,6 +111,8 @@ export function ReservationFiles({
           try {
             const form = new FormData(formNode);
             form.set("reservation_id", reservation.id);
+            if (!String(form.get("text_content") ?? "").trim())
+              form.delete("text_content");
             const response = await fetch("/api/attachments", {
               method: "POST",
               body: form,
@@ -116,6 +128,26 @@ export function ReservationFiles({
           }
         }}
       >
+        <label>
+          파일 제목
+          <input name="title" maxLength={200} disabled={!writable || busy} />
+        </label>
+        <label>
+          파일 설명
+          <textarea
+            name="description"
+            maxLength={2000}
+            disabled={!writable || busy}
+          />
+        </label>
+        <label>
+          파일과 함께 저장할 텍스트
+          <textarea
+            name="text_content"
+            maxLength={10000}
+            disabled={!writable || busy}
+          />
+        </label>
         <label>
           확인서 파일 (최대 10MB)
           <input
@@ -140,6 +172,8 @@ export function ReservationFiles({
           try {
             const form = new FormData(node);
             form.set("reservation_id", reservation.id);
+            if (!String(form.get("text_content") ?? "").trim())
+              form.delete("text_content");
             const response = await fetch("/api/attachments", {
               method: "POST",
               body: form,

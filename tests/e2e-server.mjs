@@ -17,7 +17,7 @@ const user = {
 let data;
 function reset() {
   data = structuredClone(seed);
-  data.schedule_places = [];
+
   for (const rows of Object.values(data))
     for (const row of rows) row.updated_at = "2026-10-05T00:00:00.000Z";
   data.trip_members = [
@@ -47,7 +47,21 @@ function reset() {
 }
 reset();
 const encode = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
-const token = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({ sub: user.id, aud: "authenticated", role: "authenticated", exp: Math.floor(Date.now() / 1000) + 86400 })}.fixture`;
+const token = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({ sub: user.id, aud: "authenticated", role: "authenticated", exp: Math.floor(Date.UTC(2030, 0, 1) / 1000) })}.fixture`;
+const userB = {
+  ...user,
+  id: "22222222-2222-4222-8222-222222222222",
+  email: "fixture_b@senkyo.invalid",
+};
+const tokenB = `${encode({ alg: "HS256", typ: "JWT" })}.${encode({ sub: userB.id, aud: "authenticated", role: "authenticated", exp: Math.floor(Date.UTC(2030, 0, 1) / 1000) })}.fixture-b`;
+const authenticated = (req) =>
+  req.headers.authorization?.includes(tokenB)
+    ? userB
+    : req.headers.authorization?.includes(token)
+      ? user
+      : null;
+const objects = new Map();
+let failAttachment = false;
 const server = createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1:3100");
   res.setHeader(
@@ -67,21 +81,38 @@ const server = createServer(async (req, res) => {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const raw = Buffer.concat(chunks).toString();
-  const body = raw ? JSON.parse(raw) : null;
+  const body =
+    raw && req.headers["content-type"]?.includes("application/json")
+      ? JSON.parse(raw)
+      : null;
   const respond = (status, value) => {
     res.writeHead(status);
     res.end(JSON.stringify(value));
   };
   if (url.pathname === "/test/reset") {
     reset();
+    objects.clear();
+    failAttachment = false;
+    respond(200, { ok: true });
+    return;
+  }
+  if (url.pathname === "/test/data") {
+    respond(200, { data, objectCount: objects.size });
+    return;
+  }
+  if (url.pathname === "/test/fail-attachment") {
+    failAttachment = true;
     respond(200, { ok: true });
     return;
   }
   if (url.pathname === "/auth/v1/token") {
-    if (
-      body?.email !== user.email ||
-      body?.password !== "fixture-only-password"
-    ) {
+    const selected =
+      body?.email === user.email
+        ? user
+        : body?.email === userB.email
+          ? userB
+          : null;
+    if (!selected || body?.password !== "fixture-only-password") {
       respond(400, {
         error: "invalid_grant",
         error_description: "Invalid credentials",
@@ -89,51 +120,86 @@ const server = createServer(async (req, res) => {
       return;
     }
     respond(200, {
-      access_token: token,
+      access_token: selected === user ? token : tokenB,
       refresh_token: "fixture-refresh",
       expires_in: 86400,
       token_type: "bearer",
-      user,
+      user: selected,
     });
     return;
   }
   if (url.pathname === "/auth/v1/user") {
-    respond(
-      req.headers.authorization?.includes(token) ? 200 : 401,
-      req.headers.authorization?.includes(token)
-        ? user
-        : { message: "Unauthorized" },
-    );
+    const selected = authenticated(req);
+    respond(selected ? 200 : 401, selected ?? { message: "Unauthorized" });
     return;
   }
   if (url.pathname === "/auth/v1/logout") {
     respond(200, {});
     return;
   }
-  if (url.pathname === "/rest/v1/rpc/reorder_schedule") {
-    if (!req.headers.authorization?.includes(token)) {
+  if (url.pathname.startsWith("/storage/v1/")) {
+    if (!authenticated(req)) {
       respond(403, { message: "Unauthorized" });
       return;
     }
-    const rows = data.schedule_items.filter((r) => r.date === body.p_date);
-    if (
-      rows.length !== body.p_ids.length ||
-      rows.some(
-        (r) =>
-          !body.p_ids.includes(r.id) ||
-          body.p_versions[body.p_ids.indexOf(r.id)] !== r.updated_at,
-      )
-    ) {
-      respond(409, { code: "40001" });
+    const path = url.pathname.replace("/storage/v1/object/", "");
+    if (req.method === "POST" && path.startsWith("sign/")) {
+      respond(200, {
+        signedURL: `/object/sign/${path.slice(5)}?token=${randomUUID()}`,
+      });
       return;
     }
-    body.p_ids.forEach((id, index) =>
-      Object.assign(
-        rows.find((r) => r.id === id),
-        { sort_order: index, updated_at: new Date().toISOString() },
-      ),
+    if (req.method === "DELETE") {
+      for (const prefix of body?.prefixes ?? [])
+        objects.delete(`reservation-files/${prefix}`);
+      respond(200, []);
+      return;
+    }
+    if (req.method === "POST") {
+      objects.set(path, Buffer.concat(chunks));
+      respond(200, { Key: path });
+      return;
+    }
+    respond(200, { ok: true });
+    return;
+  }
+  if (url.pathname === "/rest/v1/rpc/add_schedule_material") {
+    if (!authenticated(req)) {
+      respond(403, { message: "Unauthorized" });
+      return;
+    }
+    const schedule = data.schedule_items.find(
+      (s) => s.id === body.p_schedule_id && !s.archived,
     );
-    respond(200, null);
+    if (!schedule) {
+      respond(400, { message: "Active schedule required" });
+      return;
+    }
+    const id = body.p_reservation_id ?? randomUUID();
+    if (!body.p_reservation_id)
+      data.reservations.push({
+        id,
+        trip_id: seed.trips[0].id,
+        type: "OTHER",
+        title: body.p_title,
+        status: "PLANNED",
+        material_only: true,
+        note: "",
+        updated_at: new Date().toISOString(),
+      });
+    if (
+      !data.reservation_schedule_items.some(
+        (l) => l.reservation_id === id && l.schedule_item_id === schedule.id,
+      )
+    )
+      data.reservation_schedule_items.push({
+        id: randomUUID(),
+        trip_id: seed.trips[0].id,
+        reservation_id: id,
+        schedule_item_id: schedule.id,
+        updated_at: new Date().toISOString(),
+      });
+    respond(200, id);
     return;
   }
   const table = url.pathname.split("/").at(-1);
@@ -141,7 +207,7 @@ const server = createServer(async (req, res) => {
     respond(404, { message: "Not found" });
     return;
   }
-  if (!req.headers.authorization?.includes(token)) {
+  if (!authenticated(req)) {
     respond(403, { message: "Unauthorized" });
     return;
   }
@@ -149,6 +215,11 @@ const server = createServer(async (req, res) => {
   const matches = (r) => filters.every(([k, v]) => String(r[k]) === v.slice(3));
   let rows = data[table].filter(matches);
   if (req.method === "POST") {
+    if (table === "reservation_attachments" && failAttachment) {
+      failAttachment = false;
+      respond(400, { message: "Fixture DB failure" });
+      return;
+    }
     const added = {
       ...body,
       id: body.id ?? randomUUID(),
@@ -192,7 +263,7 @@ server.listen(3101, "127.0.0.1", () => {
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "fixture-publishable",
     NEXT_PUBLIC_SUPABASE_ANON_KEY: "fixture-anon",
     GOOGLE_MAPS_SERVER_API_KEY: "",
-    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: "",
+    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: "fixture-browser-key",
   };
   let child = spawn(
     process.execPath,

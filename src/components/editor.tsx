@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { z } from "zod";
+import { Sheet } from "./sheet";
 import { forms, labels, words } from "@/lib/forms";
 import {
   schemas,
-  splitAmount,
   type Table,
   type Row,
   type Data,
@@ -17,6 +17,7 @@ export function Editor({
   members,
   onSave,
   onClose,
+  inline = false,
 }: {
   table: Table;
   row: Row;
@@ -24,35 +25,27 @@ export function Editor({
   members: Member[];
   onSave: (values: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
+  inline?: boolean;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
-  return (
-    <dialog
-      ref={dialog}
-      aria-labelledby="editor-title"
-      onCancel={(e) => {
-        if (saving) e.preventDefault();
-        else onClose();
-      }}
-    >
-      <div className="row between">
-        <h2 id="editor-title">
-          {labels[table]} {row.id ? "수정" : "추가"}
-        </h2>
-        <button
-          type="button"
-          aria-label="닫기"
-          disabled={saving}
-          onClick={onClose}
-        >
-          닫기
-        </button>
-      </div>
+  const content = (
+    <>
+      {inline && (
+        <div className="row between">
+          <h2 id="editor-title">
+            {labels[table]} {row.id ? "수정" : "추가"}
+          </h2>
+          <button
+            type="button"
+            aria-label="작성 취소"
+            disabled={saving}
+            onClick={onClose}
+          >
+            뒤로
+          </button>
+        </div>
+      )}
       <form
         className="stack"
         onSubmit={async (e) => {
@@ -78,17 +71,6 @@ export function Editor({
                       : ["date", "time"].includes(field.type ?? "") || field.ref
                         ? value || null
                         : (value ?? "");
-            }
-            if (table === "schedule_items")
-              values.sort_order = Number(row.sort_order ?? 0);
-            if (table === "expenses") {
-              const [a, b] = splitAmount(
-                Number(values.amount),
-                String(values.split_mode),
-                Number(values.share_a_yen),
-              );
-              values.share_a_yen = a;
-              values.share_b_yen = b;
             }
             const parsed = schemas[table].parse(values);
             await onSave(parsed);
@@ -126,8 +108,10 @@ export function Editor({
               : field.ref
                 ? (
                     (field.ref === "meals"
-                      ? data.schedule_items.filter((s) => s.type === "MEAL")
-                      : data[field.ref]) ?? []
+                      ? data.schedule_items.filter(
+                          (s) => !s.archived && s.type === "MEAL",
+                        )
+                      : data[field.ref]?.filter((r) => !r.archived)) ?? []
                   ).map((r) => ({
                     id: r.id,
                     title: `${r.date ?? ""} ${r.title ?? r.custom_name ?? r.id}`,
@@ -146,7 +130,11 @@ export function Editor({
                 >
                   {field.options.map((o) => (
                     <option key={o} value={o}>
-                      {words[o] ?? o}
+                      {["owner", "buyer"].includes(field.key)
+                        ? (members.find((m) => m.slot === o)?.display_name ??
+                          words[o] ??
+                          o)
+                        : (words[o] ?? o)}
                     </option>
                   ))}
                 </select>
@@ -217,6 +205,16 @@ export function Editor({
           {saving ? "저장 중…" : "저장"}
         </button>
       </form>
-    </dialog>
+    </>
+  );
+  return inline ? (
+    <section>{content}</section>
+  ) : (
+    <Sheet
+      title={`${labels[table]} ${row.id ? "수정" : "추가"}`}
+      close={onClose}
+    >
+      {content}
+    </Sheet>
   );
 }

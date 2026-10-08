@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useMemo, useSyncExternalStore, useState } from "react";
-import { type Data, type Row, inScope } from "@/lib/domain";
+import { type Data, type Row, inScope, packingChecked } from "@/lib/domain";
 export default function Offline() {
   const raw = useSyncExternalStore(
     () => () => {},
@@ -23,7 +23,7 @@ export default function Offline() {
   const [date, setDate] = useState("2026-12-22");
   const schedules =
     data?.schedule_items
-      .filter((s) => s.date === date)
+      .filter((s) => !s.archived && s.date === date)
       .sort((a, b) => Number(a.sort_order) - Number(b.sort_order)) ?? [];
   const block = (title: string, rows: Row[], label: (row: Row) => string) => (
     <section className="card">
@@ -76,22 +76,30 @@ export default function Offline() {
           {block("일정", schedules, (r) => `${r.time_label} · ${r.title}`)}
           {block(
             "교통",
-            data.transport_segments.filter((t) => t.date === date),
+            data.transport_segments.filter(
+              (t) => !t.archived && t.date === date,
+            ),
             (r) =>
               `${r.time_label} · ${r.route_name} · ${r.origin_name} → ${r.destination_name}`,
           )}
           {block(
             "예약번호",
-            data.reservations,
+            data.reservations.filter((r) => !r.archived),
             (r) =>
               `${r.title} · ${r.reservation_number ?? "입력 전"} · ${r.note ?? ""}`,
           )}
           {block(
             "준비물",
             data.packing_items.filter((p) =>
-              inScope(p, date, data.schedule_items),
+              inScope(
+                p,
+                date,
+                data.schedule_items,
+                data.packing_schedule_items ?? [],
+              ),
             ),
-            (r) => `${r.checked ? "✓" : "□"} ${r.label}`,
+            (r) =>
+              `${packingChecked(r, date, data.packing_checks ?? []) ? "✓" : "□"} ${r.label}`,
           )}
           {block(
             "긴급정보",

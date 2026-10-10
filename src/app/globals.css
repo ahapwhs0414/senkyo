@@ -612,3 +612,84 @@ svg {
     scroll-behavior: auto !important;
   }
 }
+
+/* Reservation actions and ordered plan map */
+button.danger {
+  color: #9a3030;
+  border-color: #e8caca;
+  background: #fffafa;
+}
+button.danger:hover:not(:disabled) {
+  background: #fbecec;
+}
+.map-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 50%;
+  background: #175d4b;
+  color: white;
+  font-size: 14px;
+}
+.map-place.is-selected {
+  border-color: #175d4b;
+  box-shadow: 0 0 0 1px #175d4b;
+}
+.optional-link-start {
+  border-top: 1px solid #dce5e0;
+  padding-top: 16px;
+}
+
+/* Daily route overview uses the same plan as the timeline and map. */
+.day-overview {
+  background: linear-gradient(135deg, #edf4f0, #fff);
+  border: 1px solid #d8e6de;
+  border-radius: 24px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.day-overview h2 {
+  font-size: clamp(20px, 3vw, 28px);
+  margin: 12px 0 20px;
+  line-height: 1.5;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.day-overview-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.day-overview-meta span {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 14px;
+  color: var(--accent);
+}
+.reservation-tools {
+  margin: 12px 0 20px;
+  color: var(--muted);
+}
+.reservation-tools summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 10px 0;
+}
+.nav button.active svg {
+  background: var(--accent-soft);
+  border-radius: 8px;
+  box-shadow: 0 0 0 5px var(--accent-soft);
+}
+@media (prefers-reduced-motion: no-preference) {
+  button,
+  .card {
+    transition:
+      background-color 140ms ease,
+      border-color 140ms ease;
+  }
+}

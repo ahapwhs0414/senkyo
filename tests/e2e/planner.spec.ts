@@ -11,7 +11,7 @@ async function login(page: Page, username = "fixture_a") {
   await page.getByRole("button", { name: "로그인", exact: true }).click();
   await expect(
     page.getByRole("heading", {
-      name: "대구 → 나리타 → 도쿄 → 센다이",
+      name: "대구 → 나리타 → 우에노 → 센다이",
       exact: true,
     }),
   ).toBeVisible();
@@ -94,7 +94,7 @@ test("authentication and direct removed write paths remain protected", async ({
   ).toBeNull();
 });
 
-test("r3 timeline, hotels and fixed restaurant links preserve unresolved branches", async ({
+test("r4 timeline, hotels and fixed restaurant links preserve unresolved branches", async ({
   page,
 }) => {
   await login(page);
@@ -102,7 +102,7 @@ test("r3 timeline, hotels and fixed restaurant links preserve unresolved branche
   await day(page, 2);
   await expect(
     page.getByRole("heading", {
-      name: "센다이 우미노모리 수족관 관람",
+      name: "센다이 우미노모리 수족관",
       exact: true,
     }),
   ).toBeVisible();
@@ -110,7 +110,7 @@ test("r3 timeline, hotels and fixed restaurant links preserve unresolved branche
   await expect(page.getByText(/아라하마/)).toHaveCount(0);
   let panel = await detail(
     page,
-    "하카타 모츠나베 오오야마 센다이점 점심",
+    "하카타 모츠나베 오오야마 센다이점",
     "식당 보기",
   );
   const map = panel.getByRole("link", { name: /지도 보기/ });
@@ -125,7 +125,7 @@ test("r3 timeline, hotels and fixed restaurant links preserve unresolved branche
   ).toHaveCount(2);
   await panel.getByRole("button", { name: "닫기", exact: true }).click();
   await day(page, 4);
-  panel = await detail(page, "KOMEDA’S Coffee 아침", "식당 보기");
+  panel = await detail(page, "KOMEDA'S Coffee 아침", "식당 보기");
   await expect(
     panel.getByText(/식당 지점 또는 식사 위치 확인 필요/),
   ).toBeVisible();
@@ -252,7 +252,7 @@ test("PRE_TRIP remains once-only and schedule preparation supports add/edit/chec
   await panel.getByRole("button", { name: "닫기", exact: true }).click();
   await tab(page, "일정");
   await day(page, 2);
-  panel = await detail(page, "센다이 우미노모리 수족관 관람");
+  panel = await detail(page, "센다이 우미노모리 수족관");
   await panel.getByRole("button", { name: "준비물 추가", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(1);
   await panel.getByLabel("준비물 *", { exact: true }).fill("사용자 방수 가방");
@@ -288,7 +288,7 @@ test("moving schedule handles multiple reservations and private text/file/mixed 
   await login(page);
   await tab(page, "일정");
   await day(page, 3);
-  const panel = await detail(page, "아키우 대폭포 이동·도착", "예약자료 보기");
+  const panel = await detail(page, "아키우 대폭포 이동", "예약자료 보기");
   await panel.getByLabel("새 이동자료 제목").fill("아키우 버스 시각표");
   await panel
     .getByRole("button", { name: "자료 추가하기", exact: true })
@@ -343,12 +343,12 @@ test("moving schedule handles multiple reservations and private text/file/mixed 
     .click();
   await panel
     .getByRole("combobox", { name: "기존 예약 연결", exact: true })
-    .selectOption({ label: "Hayabusa 26" });
+    .selectOption({ label: "신칸센 센다이 → 우에노" });
   await panel
     .getByRole("button", { name: "기존 자료 연결", exact: true })
     .click();
   await expect(
-    panel.getByRole("heading", { name: "Hayabusa 26", exact: true }),
+    panel.getByRole("heading", { name: "신칸센 센다이 → 우에노", exact: true }),
   ).toBeVisible();
   await panel
     .getByRole("button", { name: "일정으로 돌아가기", exact: true })
@@ -357,7 +357,7 @@ test("moving schedule handles multiple reservations and private text/file/mixed 
     panel.getByRole("button", { name: /아키우 버스 시각표/ }),
   ).toBeVisible();
   await expect(
-    panel.getByRole("button", { name: /Hayabusa 26/ }),
+    panel.getByRole("button", { name: /신칸센 센다이 → 우에노/ }),
   ).toBeVisible();
   await page.screenshot({
     path: `${captures}/after-travel-materials.png`,
@@ -515,7 +515,7 @@ test("map failure and auth failure preserve external links without invented mark
   await expect(page.locator(".error[role=alert]")).toContainText(
     "지도를 불러오지 못했습니다",
   );
-  await expect(page.getByText(/Google 지점이 아직 연결되지/)).toBeVisible();
+  await expect(page.getByText(/Google 지점이 아직 연결되지/)).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /검색|지점 연결/ }),
   ).toHaveCount(0);
@@ -609,4 +609,273 @@ test("before/during/after labels and backdrops maintain context", async ({
   const panel = page.getByRole("dialog");
   await page.mouse.click(4, 4);
   await expect(panel).toHaveCount(0);
+});
+
+test("preparation editor has simple fields and follows the selected date", async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  await tab(page, "준비");
+  await page.getByRole("button", { name: "여행 중", exact: true }).click();
+  await page.getByRole("button", { name: "준비물 추가", exact: true }).click();
+  const panel = page.getByRole("dialog");
+  for (const label of [
+    "카테고리",
+    "필수",
+    "정렬 순서",
+    "매일 휴대 여부를 따로 체크",
+    "짐 싸기 / 준비 완료",
+  ])
+    await expect(panel.getByLabel(label, { exact: true })).toHaveCount(0);
+  await panel.getByLabel("준비물 *", { exact: true }).fill("간단한 준비물");
+  await panel.getByLabel("메모", { exact: true }).fill("사용자 메모");
+  await panel.getByLabel("날짜", { exact: true }).fill("2026-12-25");
+  const options = panel
+    .getByRole("combobox", { name: "연결 일정", exact: true })
+    .locator("option");
+  await expect(options).toHaveCount(16);
+  for (const text of (await options.allTextContents()).slice(1))
+    expect(text).toContain("2026-12-25");
+  const chosen = await options.nth(1).getAttribute("value");
+  await panel
+    .getByRole("combobox", { name: "연결 일정", exact: true })
+    .selectOption(chosen!);
+  await panel.getByLabel("날짜", { exact: true }).fill("2026-12-26");
+  await expect(
+    panel.getByRole("combobox", { name: "연결 일정", exact: true }),
+  ).toHaveValue("");
+  for (const text of (await options.allTextContents()).slice(1))
+    expect(text).toContain("2026-12-26");
+  await panel.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(panel).toHaveCount(0);
+  const state = await (
+    await request.get("http://127.0.0.1:3101/test/data")
+  ).json();
+  expect(
+    state.data.packing_items.find(
+      (p: { label: string }) => p.label === "간단한 준비물",
+    ),
+  ).toMatchObject({
+    date: "2026-12-26",
+    schedule_item_id: null,
+    checked: false,
+    note: "사용자 메모",
+    required: true,
+  });
+  await page.getByRole("button", { name: "할 일 추가", exact: true }).click();
+  await expect(panel.getByLabel(/기한/)).toHaveCount(0);
+  await panel.getByLabel("날짜", { exact: true }).fill("2026-12-27");
+  for (const text of (
+    await panel
+      .getByRole("combobox", { name: "연결 일정", exact: true })
+      .locator("option")
+      .allTextContents()
+  ).slice(1))
+    expect(text).toContain("2026-12-27");
+  await panel.getByLabel("날짜", { exact: true }).fill("");
+  await expect(
+    panel.getByRole("combobox", { name: "연결 일정", exact: true }),
+  ).toBeDisabled();
+  await page.screenshot({
+    path: `${captures}/r4-simple-preparation.png`,
+    animations: "disabled",
+  });
+});
+
+test("stored plan places without Google IDs produce numbered pins and tolerate a missing location", async ({
+  page,
+}) => {
+  await login(page);
+  await page.unroute("https://maps.googleapis.com/**");
+  await page.route("https://maps.googleapis.com/**", (route) =>
+    route.fulfill({
+      contentType: "application/javascript",
+      body: `
+    window.__mapPins=[];
+    window.google={maps:{Map:class {fitBounds(){} panTo(){} setZoom(){}},LatLngBounds:class {extend(){}},Marker:class {constructor(o){window.__mapPins.push(o)} addListener(){} setMap(){}}}};
+  `,
+    }),
+  );
+  let lookups = 0;
+  await page.route("**/api/places?place=*", (route) => {
+    lookups++;
+    if (lookups === 1)
+      return route.fulfill({
+        status: 502,
+        json: { error: "이 장소의 위치를 찾지 못했습니다" },
+      });
+    return route.fulfill({
+      json: {
+        id: `google-${lookups}`,
+        displayName: { text: `Google fixture ${lookups}` },
+        formattedAddress: "Test address",
+        location: { latitude: 35.6 + lookups / 1000, longitude: 139.7 },
+      },
+    });
+  });
+  await tab(page, "지도");
+  await expect(
+    page.getByRole("status").filter({ hasText: /위치 \d+\/\d+곳 표시/ }),
+  ).toBeVisible();
+  expect(lookups).toBeGreaterThan(1);
+  const pins = await page.evaluate(
+    () => (window as unknown as { __mapPins: { label: string }[] }).__mapPins,
+  );
+  expect(pins.length).toBe(lookups - 1);
+  expect(pins.every((p) => /^\d+$/.test(p.label))).toBe(true);
+  await expect(page.locator(".error[role=alert]")).toContainText(
+    "위치를 찾지 못했습니다",
+  );
+  await expect(page.getByText(/Google 지점이 아직 연결되지/)).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "지도에서 위치 보기", exact: true })
+    .first()
+    .click();
+  await expect(
+    page
+      .getByRole("button", { name: "지도에서 위치 보기", exact: true })
+      .first(),
+  ).toHaveAttribute("aria-pressed", "true");
+  await noOverflow(page);
+  await page.screenshot({
+    path: `${captures}/r4-map-numbered-places.png`,
+    animations: "disabled",
+  });
+});
+
+test("reservation deletion confirms, preserves the itinerary and retries failed private file cleanup", async ({
+  page,
+  request,
+}) => {
+  await login(page);
+  await tab(page, "일정");
+  await day(page, 3);
+  const panel = await detail(page, "아키우 대폭포 이동", "예약자료 보기");
+  await panel.getByLabel("새 이동자료 제목").fill("삭제할 예약 자료");
+  await panel
+    .getByRole("button", { name: "자료 추가하기", exact: true })
+    .click();
+  await panel.getByLabel("확인서 파일 (최대 10MB)").setInputFiles({
+    name: "remove.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4 removable"),
+  });
+  await panel.getByRole("button", { name: "첨부 업로드", exact: true }).click();
+  await expect(
+    panel.getByRole("heading", { name: "remove.pdf", exact: true }),
+  ).toBeVisible();
+  const before = await (
+    await request.get("http://127.0.0.1:3101/test/data")
+  ).json();
+  const r = before.data.reservations.find(
+    (r: { title: string }) => r.title === "삭제할 예약 자료",
+  );
+  const stale = await page.request.delete("/api/reservations", {
+    headers: { Origin: "http://127.0.0.1:3100" },
+    data: { id: r.id, updated_at: "2000-01-01T00:00:00.000Z" },
+  });
+  expect(stale.status()).toBe(409);
+  page.once("dialog", (d) => d.dismiss());
+  await panel
+    .getByRole("button", { name: "예약 자료 삭제", exact: true })
+    .click();
+  await expect(
+    panel.getByRole("heading", { name: "remove.pdf", exact: true }),
+  ).toBeVisible();
+  await request.post("http://127.0.0.1:3101/test/fail-storage-delete");
+  page.once("dialog", (d) => {
+    expect(d.message()).toContain("실제 예약은 취소되지 않습니다");
+    return d.accept();
+  });
+  await panel
+    .getByRole("button", { name: "예약 자료 삭제", exact: true })
+    .click();
+  await expect(
+    panel.getByRole("heading", { name: "삭제할 예약 자료", exact: true }),
+  ).toHaveCount(0);
+  await panel.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "일부 첨부 파일 정리가 남아",
+  );
+  const after = await (
+    await request.get("http://127.0.0.1:3101/test/data")
+  ).json();
+  expect(
+    after.data.reservations.some((a: { id: string }) => a.id === r.id),
+  ).toBe(false);
+  expect(
+    after.data.reservation_attachments.some(
+      (a: { reservation_id: string }) => a.reservation_id === r.id,
+    ),
+  ).toBe(false);
+  expect(
+    after.data.reservation_schedule_items.some(
+      (a: { reservation_id: string }) => a.reservation_id === r.id,
+    ),
+  ).toBe(false);
+  expect(after.data.schedule_items.length).toBe(113);
+  expect(after.objectCount).toBe(1);
+  await page
+    .getByRole("button", { name: "파일 정리 재시도", exact: true })
+    .click();
+  await expect(page.getByText(/일부 첨부 파일 정리가 남아/)).toHaveCount(0);
+  const clean = await (
+    await request.get("http://127.0.0.1:3101/test/data")
+  ).json();
+  expect(clean.objectCount).toBe(0);
+  expect(clean.data.reservation_file_deletions).toHaveLength(0);
+});
+
+test("revised Tokyo days show the new route, meals and airport train", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await tab(page, "일정");
+  await day(page, 4);
+  await expect(
+    page.getByRole("region", { name: "하루 동선 요약" }),
+  ).toBeVisible();
+  await expect(page.getByText("10:30~11:30", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "나다이 우나토토 우에노점",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "도쿄타워 관광", exact: true }),
+  ).toHaveCount(0);
+  await page.screenshot({
+    path: `${captures}/r4-day4-route-390.png`,
+    animations: "disabled",
+    fullPage: false,
+  });
+  await day(page, 5);
+  await expect(
+    page.getByRole("heading", { name: "스시로 aune 유라쿠초점", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("10:45~11:45", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "고쿄 외원·니주바시", exact: true }),
+  ).toBeVisible();
+  await day(page, 6);
+  await expect(
+    page.getByRole("heading", { name: "우에노 공원 산책", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("10:37~11:25", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "게이세이 우에노 → 나리타공항 제2터미널",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await noOverflow(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.screenshot({
+    path: `${captures}/r4-day6-route-1280.png`,
+    animations: "disabled",
+    fullPage: false,
+  });
 });

@@ -7,6 +7,8 @@ import { googlePlaceSchema, type GooglePlace } from "@/lib/google";
 import { words } from "@/lib/forms";
 interface MapInstance {
   fitBounds(bounds: Bounds): void;
+  panTo(position: { lat: number; lng: number }): void;
+  setZoom(zoom: number): void;
 }
 interface Bounds {
   extend(position: { lat: number; lng: number }): void;
@@ -24,6 +26,7 @@ interface GoogleMaps {
     position: { lat: number; lng: number };
     map: MapInstance;
     title: string;
+    label: string;
   }) => Marker;
   LatLngBounds: new () => Bounds;
 }
@@ -84,6 +87,8 @@ function loadMaps(key: string) {
   return loader;
 }
 export function TravelMap({ data, date }: { data: Data; date: string }) {
+  const mapRef = useRef<MapInstance | null>(null);
+  const cache = useRef(new Map<string, GooglePlace>());
   const container = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState("all");
   const [allDates, setAllDates] = useState(false);
@@ -91,7 +96,9 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
   const [loading, setLoading] = useState(false);
   const [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
-  const [details, setDetails] = useState<GooglePlace[]>([]);
+  const [details, setDetails] = useState<
+    { planId: string; place: GooglePlace }[]
+  >([]);
   const selectedSchedules = data.schedule_items
     .filter((s) => !s.archived && (allDates || s.date === date))
     .sort(
@@ -122,11 +129,10 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
         (filter === "all" || p.category === filter),
     )
     .sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id));
-  const ids = [
-    ...new Set(places.map((p) => p.google_place_id).filter(Boolean)),
-  ].join(",");
+  const ids = places.map((p) => p.id).join(",");
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     const markers: Marker[] = [];
     const authFailure = () => {
       loader = null;
@@ -141,27 +147,47 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
         window.removeEventListener("senkyo-maps-auth-error", authFailure);
     async function run() {
       setLoading(true);
+      setSelected(null);
+      setDetails([]);
       setError("");
       try {
         await loadMaps(key!);
-        const fetched = await Promise.allSettled(
-          ids
-            .split(",")
-            .filter(Boolean)
-            .map(async (id) => {
-              const response = await fetch(
-                `/api/places?id=${encodeURIComponent(id)}`,
-                { cache: "no-store" },
-              );
-              if (!response.ok) {
-                const result: { error?: string } = await response.json();
-                throw new Error(
-                  result.error ??
-                    "일부 장소 좌표를 불러오지 못했습니다. 장소 목록을 이용해주세요",
-                );
+        // Four workers limit requests when viewing the whole trip. Successful
+        // lookups live only in this mounted map; they are never persisted.
+        const pending = ids.split(",").filter(Boolean);
+        const fetched: PromiseSettledResult<{
+          planId: string;
+          place: GooglePlace;
+        }>[] = [];
+        let cursor = 0;
+        await Promise.all(
+          Array.from({ length: Math.min(4, pending.length) }, async () => {
+            while (active && cursor < pending.length) {
+              const id = pending[cursor++];
+              try {
+                let place = cache.current.get(id);
+                if (!place) {
+                  const response = await fetch(
+                    `/api/places?place=${encodeURIComponent(id)}`,
+                    { cache: "no-store", signal: controller.signal },
+                  );
+                  const body = await response.json();
+                  if (!response.ok)
+                    throw new Error(
+                      body.error ?? "장소 위치를 불러오지 못했습니다",
+                    );
+                  place = googlePlaceSchema.parse(body);
+                  cache.current.set(id, place);
+                }
+                fetched.push({
+                  status: "fulfilled",
+                  value: { planId: id, place },
+                });
+              } catch (reason) {
+                fetched.push({ status: "rejected", reason });
               }
-              return googlePlaceSchema.parse(await response.json());
-            }),
+            }
+          }),
         );
         const results = fetched.flatMap((r) =>
           r.status === "fulfilled" ? [r.value] : [],
@@ -174,8 +200,9 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
           center: { lat: 35.6812, lng: 139.7671 },
           zoom: 9,
         });
+        mapRef.current = map;
         const bounds = new api.LatLngBounds();
-        for (const p of results) {
+        for (const { place: p, planId } of results) {
           if (!p.location) continue;
           const position = {
             lat: p.location.latitude,
@@ -186,11 +213,13 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
             position,
             map,
             title: p.displayName.text,
+            label: String(pending.indexOf(planId) + 1),
           });
-          marker.addListener("click", () => setSelected(p.id));
+          marker.addListener("click", () => setSelected(planId));
           markers.push(marker);
         }
         if (markers.length) map.fitBounds(bounds);
+        if (markers.length === 1) map.setZoom(15);
         if (failed?.status === "rejected")
           setError(
             failed.reason instanceof Error
@@ -206,11 +235,12 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
     void run();
     return () => {
       active = false;
+      controller.abort();
       window.removeEventListener("senkyo-maps-auth-error", authFailure);
       markers.forEach((m) => m.setMap(null));
     };
   }, [ids, retry]);
-  const selectedDetail = details.find((d) => d.id === selected);
+  const selectedDetail = details.find((d) => d.planId === selected)?.place;
   return (
     <>
       <h1>여행 지도</h1>
@@ -233,8 +263,8 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
             ))}
           </select>
         </label>
-        <button onClick={() => setAllDates((v) => !v)}>
-          {allDates ? "전체 여행 · 날짜별로 보기" : "선택한 날짜 · 전체 보기"}
+        <button aria-pressed={allDates} onClick={() => setAllDates((v) => !v)}>
+          {allDates ? "선택한 날짜만 보기" : "6일 전체 장소 보기"}
         </button>
       </div>
       {!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY && (
@@ -243,11 +273,14 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
           링크를 이용할 수 있습니다.
         </p>
       )}
-      {places.length > 0 && !ids && (
-        <p className="notice">
-          이 날짜의 장소는 저장되어 있지만 Google 지점이 아직 연결되지
-          않았습니다. 계획서의 검색 링크로 지점을 확인할 수 있습니다. 좌표나
-          Place ID를 임의로 표시하지 않습니다.
+      <p className="muted">
+        일정 순서대로 {places.length}곳 · 숫자가 같은 지도 핀과 장소를 함께
+        확인하세요.
+      </p>
+      {!loading && details.length > 0 && (
+        <p role="status" className="notice">
+          위치 {details.length}/{places.length}곳 표시 · Google 검색 결과입니다.
+          방문 전 지점명과 주소를 확인해주세요.
         </p>
       )}
       {loading && <p role="status">지도와 장소 위치를 불러오는 중…</p>}
@@ -289,16 +322,7 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
               ))}
             </div>
           ))}
-          <p>
-            {selectedDetail.regularOpeningHours?.weekdayDescriptions?.join(
-              " · ",
-            ) ?? "영업시간 정보 없음"}
-          </p>
-
-          <p>
-            {selectedDetail.formattedAddress} · 평점{" "}
-            {selectedDetail.rating ?? "없음"}
-          </p>
+          <p>{selectedDetail.formattedAddress}</p>
         </div>
       )}
       {!places.length && (
@@ -306,9 +330,38 @@ export function TravelMap({ data, date }: { data: Data; date: string }) {
           이 필터에 연결된 장소가 없습니다. 다른 날짜나 필터를 선택해보세요.
         </p>
       )}
-      {places.map((p) => (
-        <div className="card" key={p.id}>
-          <h3>{String(p.custom_name)}</h3>
+      {places.map((p, index) => (
+        <div
+          className={`card map-place ${selected === p.id ? "is-selected" : ""}`}
+          key={p.id}
+        >
+          <h3>
+            <span className="map-number">{index + 1}</span>{" "}
+            {String(p.custom_name)}
+          </h3>
+          {details.some((d) => d.planId === p.id) && (
+            <button
+              aria-pressed={selected === p.id}
+              onClick={() => {
+                setSelected(p.id);
+                const position = details.find((d) => d.planId === p.id)?.place
+                  .location;
+                if (position) {
+                  mapRef.current?.panTo({
+                    lat: position.latitude,
+                    lng: position.longitude,
+                  });
+                  mapRef.current?.setZoom(15);
+                }
+                container.current?.scrollIntoView({
+                  behavior: "instant",
+                  block: "center",
+                });
+              }}
+            >
+              지도에서 위치 보기
+            </button>
+          )}
           <p>{String(p.memo)}</p>
           <a
             className="link"

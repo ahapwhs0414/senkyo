@@ -66,36 +66,35 @@ export function ReservationFiles({
               </button>
             </>
           )}
+          {writable && (
+            <button
+              className="danger"
+              disabled={busy}
+              onClick={async () => {
+                if (!confirm(`${a.file_name} 첨부를 삭제할까요?`)) return;
+                setBusy(true);
+                setError("");
+                try {
+                  const response = await fetch("/api/attachments", {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id: a.id }),
+                  });
+                  const result: { error?: string } = await response.json();
+                  if (!response.ok) throw new Error(result.error);
+                  await onRefresh();
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "첨부 삭제 실패");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {String(a.file_name)} 삭제
+            </button>
+          )}
         </section>
       ))}
-      {writable &&
-        attachments.map((a) => (
-          <button
-            key={`delete-${a.id}`}
-            disabled={busy}
-            onClick={async () => {
-              if (!confirm(`${a.file_name} 첨부를 삭제할까요?`)) return;
-              setBusy(true);
-              setError("");
-              try {
-                const response = await fetch("/api/attachments", {
-                  method: "DELETE",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ id: a.id }),
-                });
-                const result: { error?: string } = await response.json();
-                if (!response.ok) throw new Error(result.error);
-                await onRefresh();
-              } catch (e) {
-                setError(e instanceof Error ? e.message : "첨부 삭제 실패");
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            {String(a.file_name)} 삭제
-          </button>
-        ))}
       {!attachments.length && (
         <p className="muted">
           첨부된 확인서가 없습니다. 파일 또는 텍스트를 등록해보세요.

@@ -43,15 +43,10 @@ const yen = (key: string, label: string, required = false) =>
 export const forms: Record<Table, Field[]> = {
   packing_checks: [],
   packing_items: [
-    ...scope,
     f("label", "준비물", "text", { required: true }),
-    category,
     owner,
-    f("checked", "짐 싸기 / 준비 완료", "checkbox"),
-    f("repeat_daily", "매일 휴대 여부를 따로 체크", "checkbox"),
-    f("required", "필수", "checkbox", { default: true }),
     note,
-    yen("sort_order", "정렬 순서", true),
+    ...scope,
   ],
   checklist_items: [
     ...scope,
@@ -63,7 +58,6 @@ export const forms: Record<Table, Field[]> = {
     f("description", "설명", "textarea"),
     owner,
     f("status", "상태", "text", { options: ["TODO", "DONE"], default: "TODO" }),
-    f("due_at", "기한 (일본시간)", "datetime"),
     yen("priority", "우선순위 (0–10)", true),
   ],
   reservations: [
@@ -209,5 +203,13 @@ export function defaults(table: Table, date: string): Row {
             : field.ref
               ? null
               : "");
+  if (table === "packing_items")
+    Object.assign(row, {
+      category: "OTHER",
+      checked: false,
+      repeat_daily: false,
+      required: true,
+      sort_order: 0,
+    });
   return row;
 }

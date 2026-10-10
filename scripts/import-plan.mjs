@@ -3,10 +3,21 @@ import { readFileSync as read, writeFileSync as write } from "node:fs";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 const trip = "20261222-2026-4222-8222-202612270002",
-  version = "2026-10-06-r3";
-const source = read("docs/TRIP_PLAN.md", "utf8");
+  version = "2026-10-10-r4";
+const source = read("plan.md", "utf8");
 assert.ok(source.includes(`계획 버전: ${version}`));
 const legacy = JSON.parse(read("scripts/plan/legacy-seed.json"));
+const previous = JSON.parse(read("scripts/plan/r3-seed.json"));
+const historical = Object.fromEntries(
+  Object.keys(legacy).map((t) => [
+    t,
+    [
+      ...new Map(
+        [...(legacy[t] ?? []), ...(previous[t] ?? [])].map((r) => [r.id, r]),
+      ).values(),
+    ],
+  ]),
+);
 const mapping = JSON.parse(read("scripts/plan/legacy-ids.json"));
 function id(table, key) {
   if (mapping[table]?.[key]) return mapping[table][key];
@@ -99,15 +110,25 @@ for (let n = 1; n <= 6; n++) {
       }),
     );
     if (["FLIGHT", "TRAIN", "TRANSIT", "BUS", "SHUTTLE"].includes(type)) {
-      const from = ps.length >= 2 ? place(ps[0]) : null,
-        to = ps.length ? place(ps.at(-1)) : null,
+      const from =
+          ps.length >= 2 || key === "d5-bay-transfer" ? place(ps[0]) : null,
+        to =
+          key === "d5-bay-transfer"
+            ? null
+            : ps.length
+              ? place(ps.at(-1))
+              : null,
         mins = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
       data.transport_segments.push(
         keyed("transport_segments", key, {
           date,
           schedule_item_id: s.id,
           origin_name: from?.custom_name ?? "출발지 확인 필요",
-          destination_name: to?.custom_name ?? "도착지 확인 필요",
+          destination_name:
+            to?.custom_name ??
+            (key === "d5-bay-transfer"
+              ? "신바시/다케시바 방향 · 경로 미정"
+              : "도착지 확인 필요"),
           origin_place_id: from?.id ?? null,
           destination_place_id: to?.id ?? null,
           departure_time: s.start_time,
@@ -122,7 +143,8 @@ for (let n = 1; n <= 6; n++) {
           reservation_required:
             ["FLIGHT", "SHUTTLE"].includes(type) ||
             key.includes("hayabusa") ||
-            key.includes("nex-"),
+            key.includes("skyliner") ||
+            key.includes("shinkansen"),
           reservation_id: null,
           ticket_note: "실제 예약·운행 정보는 예약자료에서 확인해주세요",
           preparation_note: s.description,
@@ -183,7 +205,6 @@ for (const [key, title, keys] of rows(section("## 7.", "## 8."))) {
     });
 }
 for (const [key, due, title] of rows(section("## 6.", "공통 준비물 정의:"))) {
-  const md = due.match(/(\d{2})\/(\d{2})/);
   data.checklist_items.push(
     keyed("checklist_items", key, {
       title,
@@ -193,7 +214,7 @@ for (const [key, due, title] of rows(section("## 6.", "공통 준비물 정의:"
       scope: "PRE_TRIP",
       owner: "SHARED",
       status: "TODO",
-      due_at: md ? `2026-${md[1]}-${md[2]}T23:59:00+09:00` : null,
+      due_at: null,
       priority: 1,
     }),
   );
@@ -319,10 +340,21 @@ const backups = [
   "checklist_items",
   "reservation_attachments",
   "meal_candidates",
+  "packing_checks",
+  "packing_schedule_items",
 ];
+sql += `do $$ begin if not exists(select 1 from public.trips where id='${trip}' and plan_version in ('2026-10-06-r3','${version}')) or to_regprocedure('public.delete_reservation(uuid,uuid,timestamp with time zone)') is null then raise exception 'Apply migrations 001-007 before r4'; end if; end $$;\n`;
+sql += `select set_config('senkyo.plan_first_apply', (not exists(select 1 from public.plan_revision_backups where trip_id='${trip}' and plan_version='${version}'))::text, true);\n`;
 sql += `insert into public.plan_revision_backups(trip_id,plan_version,snapshot) select '${trip}','${version}',jsonb_build_object(${backups.map((t) => `'${t}',coalesce((select jsonb_agg(to_jsonb(t)) from public.${t} t where ${t === "trips" ? "id" : "trip_id"}='${trip}'),'[]'::jsonb)`).join(",")}) on conflict do nothing;\n`;
-for (const t of ["schedule_items", "places", "transport_segments"]) {
-  const retired = legacy[t].filter((r) => !data[t].some((p) => p.id === r.id));
+for (const t of [
+  "schedule_items",
+  "places",
+  "transport_segments",
+  "reservations",
+]) {
+  const retired = historical[t].filter(
+    (r) => !data[t].some((p) => p.id === r.id),
+  );
   if (retired.length)
     sql += `update public.${t} set archived=true where trip_id='${trip}' and id in (${retired.map((r) => quote(r.id)).join(",")}) and archived=false;\n`;
 }
@@ -340,8 +372,9 @@ const obsoleteLabels = new Set([
   "사용하지 않은 후보 장소 보관",
 ]);
 for (const t of ["packing_items", "checklist_items"]) {
-  const retired = legacy[t].filter(
+  const retired = historical[t].filter(
     (r) =>
+      (r.plan_key && !data[t].some((p) => p.id === r.id)) ||
       obsoleteLabels.has(r.label ?? r.title) ||
       (r.schedule_item_id &&
         !data.schedule_items.some((s) => s.id === r.schedule_item_id)),
@@ -351,7 +384,13 @@ for (const t of ["packing_items", "checklist_items"]) {
 }
 sql += `update public.schedule_places set archived=true where trip_id='${trip}' and archived=false;\n`;
 sql += `update public.reservations set archived=true where trip_id='${trip}' and id='${legacy.reservations.find((r) => r.title.includes("칸데오")).id}' and archived=false;\n`;
-for (const [t, rs] of Object.entries(data))
+for (const [t, rs] of Object.entries(data)) {
+  // Scope triggers require matching dates even for user-created preparations.
+  // Move their date with the stable schedule, preserving every other value.
+  if (t === "packing_items")
+    for (const table of ["packing_items", "checklist_items"]) {
+      sql += `update public.${table} p set date=s.date from public.schedule_items s where p.trip_id='${trip}' and s.trip_id=p.trip_id and p.schedule_item_id=s.id and p.date is not null and p.date is distinct from s.date;\n`;
+    }
   for (const r of rs) {
     const cols = Object.keys(r);
     const update =
@@ -390,13 +429,39 @@ for (const [t, rs] of Object.entries(data))
           : t === "packing_schedule_items"
             ? "(trip_id,packing_item_id,schedule_item_id)"
             : "(id)";
-    sql += `insert into public.${t}(${cols.join(",")}) values(${cols.map((c) => quote(r[c])).join(",")}) on conflict ${conflict} ${update.length ? "do update set " + update.map((c) => `${c}=excluded.${c}`).join(",") + " where " + update.map((c) => `${t}.${c} is distinct from excluded.${c}`).join(" or ") : "do nothing"};\n`;
+    // Existing r3 reservations are deliberately not recreated if a user deleted them.
+    if (
+      t === "reservations" &&
+      previous.reservations.some((p) => p.id === r.id)
+    )
+      continue;
+    const condition =
+      t === "reservations"
+        ? " where current_setting('senkyo.plan_first_apply')='true'"
+        : t === "reservation_schedule_items"
+          ? ` where exists(select 1 from public.reservations where trip_id='${trip}' and id=${quote(r.reservation_id)} and not archived)`
+          : "";
+    sql += `insert into public.${t}(${cols.join(",")}) select ${cols.map((c) => quote(r[c])).join(",")} ${condition} on conflict ${conflict} ${update.length ? "do update set " + update.map((c) => `${c}=excluded.${c}`).join(",") + " where " + update.map((c) => `${t}.${c} is distinct from excluded.${c}`).join(" or ") : "do nothing"};\n`;
   }
+}
+// Replace generated preparation wording only if the user has not edited it.
+for (const t of ["packing_items", "checklist_items"])
+  for (const r of data[t]) {
+    const before = previous[t].find((p) => p.id === r.id);
+    if (!before) continue;
+    for (const col of t === "packing_items"
+      ? ["label", "note"]
+      : ["title", "description"]) {
+      if (before[col] !== r[col])
+        sql += `update public.${t} set ${col}=${quote(r[col])} where trip_id='${trip}' and id=${quote(r.id)} and ${col} is not distinct from ${quote(before[col])};\n`;
+    }
+  }
+sql += `do $$ begin if (select count(*) from public.schedule_items where trip_id='${trip}' and not archived)<>${data.schedule_items.length} then raise exception 'Unexpected active schedule count'; end if; if exists(select 1 from public.reservations where trip_id='${trip}' and plan_key in ('res-nex-out','res-nex-return','res-hayabusa-out','res-hayabusa-return') and not archived) then raise exception 'Retired train reservation remains active'; end if; end $$;\n`;
 sql += "commit;\n";
 const files = {
   "src/lib/seed.json": JSON.stringify(data, null, 2) + "\n",
   "supabase/seed.sql": sql,
-  "supabase/migrations/202610060006_plan_r3.sql": sql,
+  "supabase/migrations/202610100008_plan_r4.sql": sql,
 };
 if (process.argv.includes("--check")) {
   for (const [path, text] of Object.entries(files))

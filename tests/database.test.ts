@@ -1,7 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import { readFileSync as read, readdirSync } from "node:fs";
-import seed from "../src/lib/seed.json";
+import seed from "../scripts/plan/r3-seed.json";
 import legacy from "../scripts/plan/legacy-seed.json";
 const db = new PGlite();
 const trip = "20261222-2026-4222-8222-202612270002",
@@ -48,6 +48,8 @@ beforeAll(async () => {
   await db.exec(
     "grant select,insert,update,delete on all tables in schema public,storage to authenticated",
   );
+  for (const f of files.filter((f) => f.startsWith("20261008")))
+    await db.exec(migration(f));
 });
 afterAll(async () => {
   await db.close();
@@ -156,8 +158,8 @@ describe("non-destructive r3 migration", () => {
         "select (select count(*) from schedule_items) schedules,(select count(*) from packing_items) packing,(select count(*) from reservation_schedule_items) links",
       )
     ).rows;
-    await db.exec(read("supabase/seed.sql", "utf8"));
-    await db.exec(read("supabase/seed.sql", "utf8"));
+    await db.exec(read("supabase/migrations/202610060006_plan_r3.sql", "utf8"));
+    await db.exec(read("supabase/migrations/202610060006_plan_r3.sql", "utf8"));
     expect(
       (
         await db.query(
@@ -442,7 +444,7 @@ describe("fresh install and reviewed rollback", () => {
             "select count(*)::int count from schedule_items where not archived",
           )
         ).rows[0].count,
-      ).toBe(108);
+      ).toBe(113);
       await expect(
         fresh.exec(read("supabase/plan-rollback.sql", "utf8")),
       ).rejects.toThrow("populated pre-renewal snapshot");
@@ -482,7 +484,7 @@ describe("fresh install and reviewed rollback", () => {
         )
       ).rows[0].checked,
     ).toBe(false);
-    await db.exec(read("supabase/seed.sql", "utf8"));
+    await db.exec(read("supabase/migrations/202610060006_plan_r3.sql", "utf8"));
     expect(
       (
         await db.query<{ count: number }>(
@@ -498,5 +500,257 @@ describe("fresh install and reviewed rollback", () => {
         )
       ).rows[0].note,
     ).toBe("edited after migration");
+  });
+});
+
+describe("reservation deletion transaction", () => {
+  it("rejects viewer/outsider, stale timestamps and direct deletes without losing data", async () => {
+    const r = (
+      await db.query<{ id: string; updated_at: string }>(
+        `insert into reservations(trip_id,type,title) values($1,'OTHER','delete-test') returning id,updated_at::text`,
+        [trip],
+      )
+    ).rows[0];
+    const call = "select public.delete_reservation($1,$2,$3)";
+    for (const user of [viewer, outsider])
+      await expect(
+        asUser(user, call, [trip, r.id, r.updated_at]),
+      ).rejects.toThrow("Editor required");
+    await expect(
+      asUser(editor, call, [trip, r.id, "2000-01-01T00:00:00Z"]),
+    ).rejects.toThrow("Reservation changed");
+    await expect(
+      asUser(editor, "delete from reservations where id=$1", [r.id]),
+    ).rejects.toThrow();
+    expect(
+      (await db.query("select id from reservations where id=$1", [r.id])).rows,
+    ).toHaveLength(1);
+  });
+  it("removes only the chosen reservation, preserves itinerary and queues private files with retry support", async () => {
+    const r = (
+      await db.query<{ id: string; updated_at: string }>(
+        `insert into reservations(trip_id,type,title) values($1,'OTHER','delete-linked') returning id,updated_at::text`,
+        [trip],
+      )
+    ).rows[0];
+    const schedule = seed.schedule_items[0];
+    const transport = seed.transport_segments[0];
+    const path = `${trip}/${r.id}/private.pdf`;
+    await db.query(
+      "insert into reservation_schedule_items(trip_id,reservation_id,schedule_item_id) values($1,$2,$3)",
+      [trip, r.id, schedule.id],
+    );
+    await db.query(
+      "insert into reservation_attachments(trip_id,reservation_id,file_name,storage_path,mime_type,size_bytes) values($1,$2,'file',$3,'application/pdf',100)",
+      [trip, r.id, path],
+    );
+    await db.query(
+      "update transport_segments set reservation_id=$1 where id=$2",
+      [r.id, transport.id],
+    );
+    await asUser(editor, "select public.delete_reservation($1,$2,$3)", [
+      trip,
+      r.id,
+      r.updated_at,
+    ]);
+    for (const table of [
+      "reservations",
+      "reservation_attachments",
+      "reservation_schedule_items",
+    ])
+      expect(
+        (
+          await db.query(
+            `select * from ${table} where ${table === "reservations" ? "id" : "reservation_id"}=$1`,
+            [r.id],
+          )
+        ).rows,
+      ).toHaveLength(0);
+    expect(
+      (
+        await db.query("select * from schedule_items where id=$1", [
+          schedule.id,
+        ])
+      ).rows,
+    ).toHaveLength(1);
+    expect(
+      (
+        await db.query<{ reservation_id: string | null }>(
+          "select reservation_id from transport_segments where id=$1",
+          [transport.id],
+        )
+      ).rows[0].reservation_id,
+    ).toBeNull();
+    expect(
+      (
+        await asUser(
+          editor,
+          "select * from reservation_file_deletions where storage_path=$1",
+          [path],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    for (const user of [viewer, outsider])
+      expect(
+        (await asUser(user, "select * from reservation_file_deletions")).rows,
+      ).toHaveLength(0);
+    await expect(
+      asUser(
+        editor,
+        "insert into reservation_file_deletions(storage_path,trip_id) values($1,$2)",
+        [`${trip}/invented`, trip],
+      ),
+    ).rejects.toThrow();
+    await asUser(editor, "select public.delete_reservation($1,$2,$3)", [
+      trip,
+      r.id,
+      r.updated_at,
+    ]);
+    expect(
+      (
+        await asUser(
+          editor,
+          "select * from reservation_file_deletions where storage_path=$1",
+          [path],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    await asUser(
+      editor,
+      "delete from reservation_file_deletions where storage_path=$1",
+      [path],
+    );
+  });
+});
+
+describe("r4 migration preserves personal data across moved days and changed trains", () => {
+  it("moves preparation dates, archives old trains and is safely repeatable", async () => {
+    const moved = seed.schedule_items.find((s) => s.plan_key === "d5-lunch")!;
+    const oldTrain = seed.reservations.find(
+      (r) => r.plan_key === "res-hayabusa-return",
+    )!;
+    const p = (
+      await db.query<{ id: string }>(
+        "insert into packing_items(trip_id,date,schedule_item_id,label,checked,note) values($1,'2026-12-26',$2,'MY BAG',true,'keep note') returning id",
+        [trip, moved.id],
+      )
+    ).rows[0];
+    await db.query(
+      "update reservations set reservation_number='KEEP-R3-BOOKING' where id=$1",
+      [oldTrain.id],
+    );
+    await db.query(
+      "insert into reservation_attachments(trip_id,reservation_id,file_name,text_content) values($1,$2,'KEEP TEXT','real booking details')",
+      [trip, oldTrain.id],
+    );
+    await db.exec(migration("202610100008_plan_r4.sql"));
+    expect(
+      (
+        await db.query<{ date: string; checked: boolean; note: string }>(
+          "select date::text,checked,note from packing_items where id=$1",
+          [p.id],
+        )
+      ).rows[0],
+    ).toEqual({ date: "2026-12-25", checked: true, note: "keep note" });
+    expect(
+      (
+        await db.query<{ archived: boolean; reservation_number: string }>(
+          "select archived,reservation_number from reservations where id=$1",
+          [oldTrain.id],
+        )
+      ).rows[0],
+    ).toEqual({ archived: true, reservation_number: "KEEP-R3-BOOKING" });
+    expect(
+      (
+        await db.query(
+          "select id from reservation_attachments where reservation_id=$1 and file_name='KEEP TEXT'",
+          [oldTrain.id],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    expect(
+      (await db.query("select id from schedule_items where not archived")).rows,
+    ).toHaveLength(113);
+    const newTrain = (
+      await db.query<{ id: string; updated_at: string }>(
+        "select id,updated_at::text from reservations where plan_key='res-skyliner-return'",
+      )
+    ).rows[0];
+    await asUser(editor, "select public.delete_reservation($1,$2,$3)", [
+      trip,
+      newTrain.id,
+      newTrain.updated_at,
+    ]);
+    await db.exec(migration("202610100008_plan_r4.sql"));
+    expect(
+      (await db.query("select id from reservations where id=$1", [newTrain.id]))
+        .rows,
+    ).toHaveLength(0);
+    expect(
+      (await db.query("select id from schedule_items where not archived")).rows,
+    ).toHaveLength(113);
+    expect(
+      (
+        await db.query(
+          "select id from packing_items where id=$1 and checked and note='keep note'",
+          [p.id],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    expect(
+      (
+        await db.query(
+          "select * from plan_revision_backups where plan_version='2026-10-10-r4'",
+        )
+      ).rows,
+    ).toHaveLength(1);
+  });
+});
+
+describe("failed delete rolls back the entire reservation transaction", () => {
+  it("does not leave a cleanup job or lose attachments when a dependent table blocks deletion", async () => {
+    const r = (
+      await db.query<{ id: string; updated_at: string }>(
+        "insert into reservations(trip_id,type,title) values($1,'OTHER','blocked-delete') returning id,updated_at::text",
+        [trip],
+      )
+    ).rows[0];
+    await db.query(
+      "insert into reservation_attachments(trip_id,reservation_id,file_name,storage_path,mime_type,size_bytes) values($1,$2,'safe.pdf',$3,'application/pdf',100)",
+      [trip, r.id, `${trip}/${r.id}/safe.pdf`],
+    );
+    await db.exec(
+      "create table public.test_reservation_dependency(reservation_id uuid references public.reservations(id))",
+    );
+    await db.query("insert into test_reservation_dependency values($1)", [
+      r.id,
+    ]);
+    await expect(
+      asUser(editor, "select public.delete_reservation($1,$2,$3)", [
+        trip,
+        r.id,
+        r.updated_at,
+      ]),
+    ).rejects.toThrow();
+    expect(
+      (await db.query("select id from reservations where id=$1", [r.id])).rows,
+    ).toHaveLength(1);
+    expect(
+      (
+        await db.query(
+          "select id from reservation_attachments where reservation_id=$1",
+          [r.id],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    expect(
+      (
+        await db.query(
+          "select * from reservation_file_deletions where storage_path=$1",
+          [`${trip}/${r.id}/safe.pdf`],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    await db.exec("drop table public.test_reservation_dependency");
   });
 });

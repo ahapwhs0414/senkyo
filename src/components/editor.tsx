@@ -27,6 +27,12 @@ export function Editor({
   onClose: () => void;
   inline?: boolean;
 }) {
+  const preparation = table === "packing_items" || table === "checklist_items";
+  const [selectedDate, setSelectedDate] = useState(String(row.date ?? ""));
+  const [scheduleId, setScheduleId] = useState(
+    String(row.schedule_item_id ?? ""),
+  );
+  const [scopeValue, setScopeValue] = useState(String(row.scope ?? "PRE_TRIP"));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const content = (
@@ -54,7 +60,7 @@ export function Editor({
           setError("");
           try {
             const form = new FormData(e.currentTarget);
-            const values: Record<string, unknown> = {};
+            const values: Record<string, unknown> = { ...row };
             for (const field of forms[table]) {
               const value = form.get(field.key);
               values[field.key] =
@@ -71,6 +77,17 @@ export function Editor({
                       : ["date", "time"].includes(field.type ?? "") || field.ref
                         ? value || null
                         : (value ?? "");
+            }
+            if (table === "checklist_items") {
+              // Date and schedule choices determine the scope; no invisible
+              // PRE_TRIP value can silently hide an item from its selected day.
+              values.scope = scheduleId
+                ? "SCHEDULE"
+                : selectedDate
+                  ? "DATE"
+                  : scopeValue === "PRE_TRIP"
+                    ? "PRE_TRIP"
+                    : "TRIP";
             }
             const parsed = schemas[table].parse(values);
             await onSave(parsed);
@@ -111,17 +128,96 @@ export function Editor({
                       ? data.schedule_items.filter(
                           (s) => !s.archived && s.type === "MEAL",
                         )
-                      : data[field.ref]?.filter((r) => !r.archived)) ?? []
+                      : data[field.ref]?.filter(
+                          (r) =>
+                            !r.archived &&
+                            (!preparation ||
+                              field.ref !== "schedule_items" ||
+                              (selectedDate && r.date === selectedDate)),
+                        )) ?? []
                   ).map((r) => ({
                     id: r.id,
                     title: `${r.date ?? ""} ${r.title ?? r.custom_name ?? r.id}`,
                   }))
                 : null;
           return (
-            <label key={field.key}>
+            <label
+              key={field.key}
+              className={
+                table === "packing_items" && field.key === "date"
+                  ? "optional-link-start"
+                  : undefined
+              }
+            >
               {field.label}
               {field.required ? " *" : ""}
-              {field.options ? (
+              {preparation && field.key === "date" ? (
+                <input
+                  name="date"
+                  type="date"
+                  value={selectedDate}
+                  min="2026-12-22"
+                  max="2026-12-27"
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setSelectedDate(next);
+                    if (
+                      !data.schedule_items.some(
+                        (s) =>
+                          s.id === scheduleId && !s.archived && s.date === next,
+                      )
+                    )
+                      setScheduleId("");
+                    setScopeValue(next ? "DATE" : "TRIP");
+                  }}
+                />
+              ) : preparation && field.key === "schedule_item_id" ? (
+                <select
+                  name="schedule_item_id"
+                  value={scheduleId}
+                  disabled={!selectedDate}
+                  onChange={(e) => {
+                    setScheduleId(e.target.value);
+                    setScopeValue(
+                      e.target.value
+                        ? "SCHEDULE"
+                        : selectedDate
+                          ? "DATE"
+                          : "TRIP",
+                    );
+                  }}
+                >
+                  <option value="">
+                    {selectedDate ? "연결 안 함" : "날짜를 먼저 선택하세요"}
+                  </option>
+                  {options?.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.title}
+                    </option>
+                  ))}
+                </select>
+              ) : table === "checklist_items" && field.key === "scope" ? (
+                <select
+                  name="scope"
+                  value={scopeValue}
+                  onChange={(e) => {
+                    setScopeValue(e.target.value);
+                    if (["PRE_TRIP", "TRIP"].includes(e.target.value)) {
+                      setSelectedDate("");
+                      setScheduleId("");
+                    }
+                  }}
+                >
+                  {(selectedDate
+                    ? [scheduleId ? "SCHEDULE" : "DATE", "PRE_TRIP", "TRIP"]
+                    : ["PRE_TRIP", "TRIP"]
+                  ).map((v) => (
+                    <option key={v} value={v}>
+                      {words[v]}
+                    </option>
+                  ))}
+                </select>
+              ) : field.options ? (
                 <select
                   name={field.key}
                   defaultValue={String(
@@ -200,7 +296,11 @@ export function Editor({
             {error}
           </p>
         )}
-        <p className="muted">시간은 일본 현지시간, 금액은 정수 엔입니다.</p>
+        <p className="muted">
+          {preparation
+            ? "날짜와 일정 연결은 선택 사항입니다. 날짜를 바꾸면 다른 날짜의 일정 연결은 해제됩니다."
+            : "시간은 일본 현지시간, 금액은 정수 엔입니다."}
+        </p>
         <button className="primary" disabled={saving}>
           {saving ? "저장 중…" : "저장"}
         </button>

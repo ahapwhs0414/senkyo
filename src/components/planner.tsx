@@ -83,6 +83,7 @@ export function Planner({
   );
   const [clock, setClock] = useState(() => new Date());
   const [error, setError] = useState("");
+  const [cleanupPending, setCleanupPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [offline, setOffline] = useState(false);
   const [sync, setSync] = useState("연결 중");
@@ -218,9 +219,7 @@ export function Planner({
   );
   const before = data.checklist_items
     .filter((p) => !p.archived && p.scope === "PRE_TRIP")
-    .sort((a, b) =>
-      String(a.due_at ?? "").localeCompare(String(b.due_at ?? "")),
-    );
+    .sort((a, b) => Number(b.priority) - Number(a.priority));
   const today = tokyoDate(clock),
     preview = today !== date;
   const daysLeft = Math.ceil(
@@ -345,9 +344,6 @@ export function Planner({
                       : "공통 · 짐 싸기 완료"}
               {completed(table, row) ? " · 완료" : " · 미완료"}
             </small>
-            {row.due_at && (
-              <small>확인일 {String(row.due_at).slice(0, 10)}</small>
-            )}
             {!row.schedule_item_id &&
               (data.packing_schedule_items ?? []).some(
                 (l) => l.packing_item_id === row.id,
@@ -467,6 +463,34 @@ export function Planner({
       setBusy(false);
     }
   }
+  async function deleteReservation(r: Row | null) {
+    if (
+      r &&
+      !confirm(
+        `「${r.title}」 예약 자료와 첨부 ${(data.reservation_attachments ?? []).filter((a) => a.reservation_id === r.id).length}개를 영구 삭제할까요?\n연결된 모든 일정에서 자료가 제거됩니다. 여행 일정은 유지되며 실제 예약은 취소되지 않습니다.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/reservations", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(r ? { id: r.id, updated_at: r.updated_at } : null),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setCleanupPending(result.cleanupPending);
+      setReservationId(null);
+      setEditor(null);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "예약 자료 삭제 실패");
+    } finally {
+      setBusy(false);
+    }
+  }
   function reservationPanel(r: Row) {
     return (
       <section className="stack">
@@ -523,12 +547,21 @@ export function Planner({
         >
           예약 수정
         </button>
+        {writable && (
+          <button
+            className="danger"
+            disabled={busy}
+            onClick={() => void deleteReservation(r)}
+          >
+            예약 자료 삭제
+          </button>
+        )}
         <ReservationFiles
           reservation={r}
           attachments={(data.reservation_attachments ?? []).filter(
             (a) => a.reservation_id === r.id,
           )}
-          writable={writable}
+          writable={writable && !busy}
           onRefresh={refresh}
         />
         <p className="muted">
@@ -726,6 +759,14 @@ export function Planner({
           오프라인 · 이전에 조회한 정보를 읽기 전용으로 표시합니다.
         </p>
       )}
+      {cleanupPending && (
+        <div className="notice" role="status">
+          예약 자료는 삭제되었습니다. 일부 첨부 파일 정리가 남아 있습니다.
+          <button disabled={busy} onClick={() => void deleteReservation(null)}>
+            파일 정리 재시도
+          </button>
+        </div>
+      )}
       {error && (
         <p className="error" role="alert">
           {error}
@@ -858,9 +899,29 @@ export function Planner({
       {view === "schedule" && (
         <>
           <h1>전체 일정</h1>
-          <p className="muted">
-            {date} · 계획서 {String(data.trips[0]?.plan_version ?? "")}
-          </p>
+          <section className="day-overview" aria-label="하루 동선 요약">
+            <span className="eyebrow">
+              DAY {Number(day?.day_number)} · {date}
+            </span>
+            <h2>{String(day?.title)}</h2>
+            <div className="day-overview-meta">
+              <span>
+                <CalendarDays size={16} /> {schedules.length}개 일정
+              </span>
+              <span>
+                <Utensils size={16} />{" "}
+                {schedules.filter((s) => s.type === "MEAL").length}번의 식사
+              </span>
+            </div>
+            <p className="muted">
+              {date === "2026-12-27"
+                ? "귀국일 · 호텔에 맡긴 짐을 찾은 뒤 공항으로"
+                : String(day?.hotel_name)}
+            </p>
+            <button onClick={() => changeView("map")}>
+              <MapPin size={16} /> 이 날짜 지도 보기
+            </button>
+          </section>
           {timeline()}
         </>
       )}
@@ -950,6 +1011,20 @@ export function Planner({
       {view === "reservations" && (
         <>
           <h1>예약자료</h1>
+          {writable && (
+            <details className="reservation-tools">
+              <summary>삭제한 첨부 파일 정리</summary>
+              <p className="muted">
+                연결 문제로 남은 삭제 파일이 있다면 다시 정리할 수 있습니다.
+              </p>
+              <button
+                disabled={busy}
+                onClick={() => void deleteReservation(null)}
+              >
+                남은 삭제 파일 정리
+              </button>
+            </details>
+          )}
           <p className="muted">여행 일정에서 연결한 텍스트와 파일을 한곳에.</p>
           {data.reservations
             .filter((r) => !r.archived)

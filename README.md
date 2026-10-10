@@ -1,7 +1,7 @@
 # 둘이, 일본 — senkyo
 
 2026-12-22~27 두 사람의 겨울 일본 여행. 계획을 읽고 예약자료와 준비 상태를 관리합니다.
-여행 데이터: [TRIP_PLAN 2026-10-06-r3](docs/TRIP_PLAN.md). 기능·디자인: [개편안](docs/SENKYO_RENEWAL_PLAN.md), [구현 계약](docs/FUNCTIONAL_SPEC.md).
+여행 데이터: [plan.md 2026-10-10-r4](plan.md). 기능·디자인: [개편안](SENKYO_RENEWAL_PLAN.md), [구현 계약](docs/FUNCTIONAL_SPEC.md).
 
 ## 개발과 검증
 
@@ -26,9 +26,9 @@ E2E는 테스트 전용 Supabase 계약 fixture, DB 보존/권한은 실제 Post
 
 ## DB 초기화와 기존 데이터 반영
 
-[비파괴 migration 적용·검토·롤백 절차](docs/MIGRATION_R3.md)를 먼저 읽으세요.
+[비파괴 migration 적용·검토·복구 절차](docs/MIGRATION_R4.md)를 먼저 읽으세요.
 신규 DB는 migrations를 파일명 순으로 적용하고 seed.sql을 적용합니다.
-기존 DB는 검증된 백업 후 202610060005/006 두 migration을 검토해 적용합니다. 이번 작업에서 운영 DB에 적용하지 않았습니다.
+001~006이 적용된 기존 DB는 검증된 백업 후 007 예약 삭제 구조와 008 r4 계획만 순서대로 적용합니다. 이번 작업에서 운영 DB에 적용하지 않았습니다.
 계획 생성은 `npm run seed:generate` 또는 `node scripts/import-plan.mjs`; 명시적 표와 기존 UUID 매핑으로 JSON/SQL을 재생성합니다.
 출력은 계획 필드만 갱신하며 예약자료·첨부·기존 준비 상태를 보존합니다. 옛 숙소 자료는 보관합니다.
 지출·정산·일정/장소/후보 식당 편집 UI와 쓰기는 제거했습니다. 기존 비용 데이터는 삭제하지 않습니다.
@@ -58,7 +58,7 @@ node --env-file=.env.local scripts/create-accounts.mjs .env.accounts.json
 계획서의 장소명 검색 링크가 기본입니다. API 키 없이 동작하며 지점·운영시간의 검증 완료를 뜻하지 않습니다.
 코메다/요시노야/돈키호테 등의 미확정 지점은 임의로 생성하지 않습니다.
 내장 지도는 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY(Maps JavaScript API, 실제 웹사이트 referrer 제한),
-확인된 Place ID의 상세/좌표 조회는 GOOGLE_MAPS_SERVER_API_KEY(Places API New, 서버에 맞는 제한)가 필요합니다.
+저장된 계획의 장소 검색 및 Place ID 상세/좌표 조회는 GOOGLE_MAPS_SERVER_API_KEY(Places API New, 서버에 맞는 제한)가 필요합니다.
 서버 키에 브라우저 HTTP referrer 제한을 적용하지 마세요. 고정 송신 IP가 없는 서버에 임의 IP를 등록하지 마세요.
 NEXT_PUBLIC 값 변경 후에는 새 build가 필요합니다. Google API 장애 중에도 외부 링크는 사용할 수 있습니다.
 [지도 진단 기록](docs/RENEWAL_CHANGELOG.md)을 참고하세요. 운영 설정은 이번 환경에 없어 미검증입니다.
@@ -72,6 +72,18 @@ NEXT_PUBLIC 값 변경 후에는 새 build가 필요합니다. Google API 장애
 
 ## 변경과 검토
 
-[단계별 변경·검증](docs/RENEWAL_CHANGELOG.md), [migration 적용 순서](docs/MIGRATION_R3.md).
-운영 DB 삭제·Vercel 배포는 수행하지 않습니다. 배포 시 Next.js Framework Preset과 저장소 루트/기본 출력 디렉터리를 사용하세요.
+[단계별 변경·검증](docs/RENEWAL_CHANGELOG.md), [migration 적용 순서](docs/MIGRATION_R4.md).
+운영 DB 초기화는 하지 않습니다. 명시적인 배포 요청이 있으면 migration 적용을 확인한 후 main 반영으로 연결된 Vercel 자동 배포를 진행합니다. 배포 시 Next.js Framework Preset과 저장소 루트/기본 출력 디렉터리를 사용하세요.
 Pretendard 1.3.9를 자체 제공하며 [OFL 라이선스](public/fonts/OFL.txt)를 포함합니다.
+
+
+## 최신 적용: 2026-10-10
+
+현재 변경은 예약자료 전체 삭제, 저장된 장소의 Google 검색 위치 표시, 준비 입력 간소화 및 plan.md 최신 일정을 포함합니다.
+
+이미 001~006을 적용한 환경에서는 **007 예약 삭제 구조 → 008 r4 계획** 순으로 적용합니다. 운영 DB를 초기화하거나 기존 001~006을 다시 실행할 필요가 없습니다.
+[적용·검증·복구 절차](docs/MIGRATION_R4.md)를 먼저 확인하세요. 이 변경 작업에서는 운영 DB 적용과 배포를 실행하지 않았습니다.
+
+지도: `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`(Maps JavaScript API, 운영 도메인 제한)와 `GOOGLE_MAPS_SERVER_API_KEY`(Places API New, 서버 접근 가능한 제한)가 필요합니다. 키의 결제/API 설정은 실제 Google 프로젝트에서 확인합니다. 계획 검색 링크는 API 키 없이 동작합니다.
+
+추가 여행 기능(운행정보·기상·일본어 주소 등)은 사용자 요청에 따라 이번 개발 범위에서 제외합니다.

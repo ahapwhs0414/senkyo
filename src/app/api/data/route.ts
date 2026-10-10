@@ -89,6 +89,8 @@ export async function DELETE(request: Request) {
     if (!sameOrigin(request)) throw new Error("잘못된 요청");
     const { client } = await authorize(true);
     const input = envelope.parse(await request.json());
+    if (input.table === "reservations")
+      throw new Error("예약 자료 전용 삭제 기능을 이용해주세요");
     if (!input.id || !input.updated_at)
       throw new Error("최신 데이터와 ID가 필요합니다");
     const { data, error } = await client

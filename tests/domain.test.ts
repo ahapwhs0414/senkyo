@@ -15,13 +15,13 @@ import {
 } from "../src/lib/domain";
 import rawSeed from "../src/lib/seed.json";
 const seed: Data = rawSeed;
-describe("r3 travel contracts", () => {
+describe("r4 travel contracts", () => {
   it("uses Japanese date across UTC midnight", () =>
     expect(tokyoDate(new Date("2026-12-21T15:01:00Z"))).toBe("2026-12-22"));
   it("imports all explicit keys, preserves approximate times and leaves booking details unset", () => {
     expect(seed.trip_days).toHaveLength(6);
-    expect(seed.schedule_items).toHaveLength(108);
-    expect(seed.trips[0].plan_version).toBe("2026-10-06-r3");
+    expect(seed.schedule_items).toHaveLength(113);
+    expect(seed.trips[0].plan_version).toBe("2026-10-10-r4");
     expect(seed.reservations.length).toBeGreaterThan(10);
     expect(
       seed.reservations.every(
@@ -35,7 +35,7 @@ describe("r3 travel contracts", () => {
     expect(
       seed.schedule_items.find((s) => s.plan_key === "d3-bus-falls")
         ?.time_label,
-    ).toBe("09:20 전후~약 09:45");
+    ).toBe("09:20 전후");
   });
   it("removes Arahama, updates the aquarium/shuttle/hotel and keeps unresolved meals without invented places", () => {
     expect(
@@ -69,7 +69,7 @@ describe("r3 travel contracts", () => {
       ["d2-lunch", "oyama-sendai"],
       ["d3-lunch", "kaichi-honten"],
       ["d3-dinner", "tsujihan-ark"],
-      ["d4-lunch", "sushiro-shibuya"],
+      ["d5-sushiro-lunch", "sushiro-yurakucho"],
       ["d4-dinner", "hajime"],
       ["d5-lunch", "unatoto-ueno"],
       ["d5-dinner", "moheji-ueno"],
@@ -240,5 +240,37 @@ describe("r3 travel contracts", () => {
     expect(
       seed.checklist_items.filter((c) => c.scope === "PRE_TRIP"),
     ).toHaveLength(18);
+  });
+});
+
+describe("latest user itinerary", () => {
+  it("keeps the revised meals, moved visits and train times exactly", () => {
+    for (const [key, date, start, end] of [
+      ["d5-ameyoko", "2026-12-25", "10:30", "11:30"],
+      ["d5-lunch", "2026-12-25", "11:40", "12:40"],
+      ["d6-kokyo", "2026-12-26", "09:15", "10:15"],
+      ["d5-sushiro-lunch", "2026-12-26", "10:45", "11:45"],
+      ["d4-tower", "2026-12-26", "13:30", "15:00"],
+      ["d5-park", "2026-12-27", "08:10", "09:20"],
+      ["d1-skyliner-out", "2026-12-22", "14:42", "15:23"],
+      ["d1-shinkansen-out", "2026-12-22", "16:06", "18:06"],
+      ["d3-shinkansen-return", "2026-12-24", "15:44", "17:42"],
+      ["d6-skyliner-return", "2026-12-27", "10:37", "11:25"],
+    ])
+      expect(seed.schedule_items.find((s) => s.plan_key === key)).toMatchObject(
+        { date, start_time: start, end_time: end },
+      );
+    expect(
+      seed.schedule_items.some((s) =>
+        /N.EX|Hayabusa|스시로 시부야/.test(String(s.title)),
+      ),
+    ).toBe(false);
+    expect(
+      seed.schedule_items.filter((s) => s.date === "2026-12-25"),
+    ).toHaveLength(15);
+    expect(
+      seed.schedule_items.find((s) => s.plan_key === "d6-flight-return")
+        ?.place_id,
+    ).toBe(seed.places.find((p) => p.plan_key === "narita-t2")?.id);
   });
 });

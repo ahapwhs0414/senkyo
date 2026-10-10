@@ -4,7 +4,10 @@ export const googlePlaceSchema = z.object({
   displayName: z.object({ text: z.string() }),
   formattedAddress: z.string().optional(),
   location: z
-    .object({ latitude: z.number(), longitude: z.number() })
+    .object({
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+    })
     .optional(),
   rating: z.number().optional(),
   userRatingCount: z.number().optional(),
@@ -118,7 +121,7 @@ export function googleErrorInfo(
     UNAUTHENTICATED:
       "Google 서버용 API 키 인증에 실패했습니다. 배포 환경변수를 확인해주세요.",
     NOT_FOUND:
-      "Google에서 이 장소를 찾을 수 없습니다. 정확한 지점을 다시 검색해 연결해주세요.",
+      "Google에서 이 장소를 찾을 수 없습니다. 계획서의 외부 지도 링크로 확인해주세요.",
     INVALID_ARGUMENT:
       "Google 장소 요청을 처리하지 못했습니다. 검색어나 장소 연결을 확인해주세요.",
   };

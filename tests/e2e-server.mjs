@@ -17,6 +17,7 @@ const user = {
 let data;
 function reset() {
   data = structuredClone(seed);
+  data.reservation_file_deletions = [];
 
   for (const rows of Object.values(data))
     for (const row of rows) row.updated_at = "2026-10-05T00:00:00.000Z";
@@ -62,6 +63,7 @@ const authenticated = (req) =>
       : null;
 const objects = new Map();
 let failAttachment = false;
+let failStorageDelete = false;
 const server = createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1:3100");
   res.setHeader(
@@ -93,11 +95,17 @@ const server = createServer(async (req, res) => {
     reset();
     objects.clear();
     failAttachment = false;
+    failStorageDelete = false;
     respond(200, { ok: true });
     return;
   }
   if (url.pathname === "/test/data") {
     respond(200, { data, objectCount: objects.size });
+    return;
+  }
+  if (url.pathname === "/test/fail-storage-delete") {
+    failStorageDelete = true;
+    respond(200, { ok: true });
     return;
   }
   if (url.pathname === "/test/fail-attachment") {
@@ -150,6 +158,11 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "DELETE") {
+      if (failStorageDelete) {
+        failStorageDelete = false;
+        respond(500, { message: "Fixture Storage failure" });
+        return;
+      }
       for (const prefix of body?.prefixes ?? [])
         objects.delete(`reservation-files/${prefix}`);
       respond(200, []);
@@ -161,6 +174,35 @@ const server = createServer(async (req, res) => {
       return;
     }
     respond(200, { ok: true });
+    return;
+  }
+  if (url.pathname === "/rest/v1/rpc/delete_reservation") {
+    if (!authenticated(req)) {
+      respond(403, { message: "Unauthorized" });
+      return;
+    }
+    const r = data.reservations.find(
+      (r) => r.id === body.p_reservation_id && r.trip_id === body.p_trip_id,
+    );
+    if (r && r.updated_at !== body.p_updated_at) {
+      respond(409, { code: "40001", message: "Reservation changed" });
+      return;
+    }
+    if (r) {
+      for (const a of data.reservation_attachments.filter(
+        (a) => a.reservation_id === r.id && a.storage_path,
+      ))
+        data.reservation_file_deletions.push({
+          trip_id: r.trip_id,
+          storage_path: a.storage_path,
+        });
+      for (const t of ["reservation_attachments", "reservation_schedule_items"])
+        data[t] = data[t].filter((a) => a.reservation_id !== r.id);
+      for (const t of data.transport_segments)
+        if (t.reservation_id === r.id) t.reservation_id = null;
+      data.reservations = data.reservations.filter((a) => a.id !== r.id);
+    }
+    respond(200, null);
     return;
   }
   if (url.pathname === "/rest/v1/rpc/add_schedule_material") {
